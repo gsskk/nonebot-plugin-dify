@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nonebot-plugin-dify"
-version = "0.1.0"
+version = "0.1.1"
 description = "A Nonebot plugin for interacting with Dify"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -32,5 +32,5 @@ dependencies = [
 "Documentation" = "https://github.com/gsskk/nonebot-plugin-dify/blob/main/README.md"
 "Issue Tracker" = "https://github.com/gsskk/nonebot-plugin-dify/issues"
 
-[tool.setuptools.packages.find]
+[tool.setuptools]
 packages = ["nonebot_plugin_dify"]

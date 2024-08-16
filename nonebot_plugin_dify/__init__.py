@@ -19,7 +19,7 @@ relative_path = os.path.abspath(os.path.dirname(__file__))
 
 dify_bot = DifyBot()
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 __plugin_meta__ = PluginMetadata(
     name="dify插件",
