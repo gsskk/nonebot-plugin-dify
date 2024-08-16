@@ -32,5 +32,6 @@ dependencies = [
 "Documentation" = "https://github.com/gsskk/nonebot-plugin-dify/blob/main/README.md"
 "Issue Tracker" = "https://github.com/gsskk/nonebot-plugin-dify/issues"
 
-[tool.setuptools]
-packages = ["nonebot_plugin_dify"]
+[tool.setuptools.packages.find]
+where = ["nonebot_plugin_dify"]
+include = ["nonebot_plugin_dify*"]
