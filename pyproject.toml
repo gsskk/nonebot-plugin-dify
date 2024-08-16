@@ -34,3 +34,6 @@ dependencies = [
 
 [tool.setuptools]
 packages = ["nonebot_plugin_dify"]
+
+[tool.setuptools.packages.find]
+where = ["."]
