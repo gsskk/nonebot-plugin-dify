@@ -4,22 +4,21 @@ from nonebot.internal.matcher.matcher import Matcher
 from nonebot.plugin import PluginMetadata, inherit_supported_adapters
 from nonebot.rule import Rule, to_me
 from nonebot.typing import T_State
+import os
 
+require("nonebot_plugin_alconna")
+from nonebot_plugin_alconna import Image, At, UniMessage, image_fetch
 from .config import config
 from .dify_bot import DifyBot
 from .common.reply_type import ReplyType
 from .common import memory
 from .common.utils import get_pic_from_url, save_pic
-import os
-
-require("nonebot_plugin_alconna")
-from nonebot_plugin_alconna import Image, At, UniMessage, image_fetch
 
 relative_path = os.path.abspath(os.path.dirname(__file__))
 
 dify_bot = DifyBot()
 
-__version__ = "0.1.1"
+__version__ = "0.1.2"
 
 __plugin_meta__ = PluginMetadata(
     name="dify插件",
