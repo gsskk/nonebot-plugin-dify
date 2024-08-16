@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "nonebot-plugin-dify"
 version = "0.1.0"
-description = "Support dify in nonebot2"
+description = "A Nonebot plugin for interacting with Dify"
 readme = "README.md"
 requires-python = ">=3.10"
 
@@ -33,5 +33,5 @@ dependencies = [
 "Issue Tracker" = "https://github.com/gsskk/nonebot-plugin-dify/issues"
 
 [tool.setuptools]
-package-dir = {"" = "src"}  # 如果你的源代码在 `src` 目录下
+package-dir = {"" = "nonebot_plugin_dify"}  # 如果你的源代码在 `src` 目录下
 packages = ["nonebot_plugin_dify"]
