@@ -33,5 +33,4 @@ dependencies = [
 "Issue Tracker" = "https://github.com/gsskk/nonebot-plugin-dify/issues"
 
 [tool.setuptools]
-package-dir = {"" = "nonebot_plugin_dify"}  # 如果你的源代码在 `src` 目录下
 packages = ["nonebot_plugin_dify"]
