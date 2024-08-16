@@ -18,12 +18,12 @@ relative_path = os.path.abspath(os.path.dirname(__file__))
 
 dify_bot = DifyBot()
 
-__version__ = "0.1.2"
+__version__ = "0.1.3"
 
 __plugin_meta__ = PluginMetadata(
     name="dify插件",
     description="接入dify API",
-    homepage="",
+    homepage="https://github.com/gsskk/nonebot-plugin-dify",
     usage="",
     type="application",
     config=None,
