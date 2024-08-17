@@ -6,27 +6,28 @@ from nonebot.rule import Rule, to_me
 from nonebot.typing import T_State
 import os
 
+require("nonebot_plugin_localstore")
 require("nonebot_plugin_alconna")
 from nonebot_plugin_alconna import Image, At, UniMessage, image_fetch
-from .config import config
+import nonebot_plugin_localstore as store
+from .config import Config, config
 from .dify_bot import DifyBot
 from .common.reply_type import ReplyType
 from .common import memory
 from .common.utils import get_pic_from_url, save_pic
 
-relative_path = os.path.abspath(os.path.dirname(__file__))
 
 dify_bot = DifyBot()
 
-__version__ = "0.1.3"
+__version__ = "0.1.4"
 
 __plugin_meta__ = PluginMetadata(
     name="dify插件",
     description="接入dify API",
     homepage="https://github.com/gsskk/nonebot-plugin-dify",
-    usage="",
+    usage="使用dify云服务或自建dify创建app，然后在配置文件中设置相应dify API",
     type="application",
-    config=None,
+    config=Config,
     supported_adapters=inherit_supported_adapters("nonebot_plugin_alconna"),
     extra={
         "author": "gsskk",
@@ -88,8 +89,10 @@ async def _(
         _img_bytes = await image_fetch(event=event, bot=bot, state=T_State, img=_img)
         if _img_bytes: 
             logger.debug(f"Got image {_img.id} from {adapter_name}.")
-            
-            save_dir = os.path.join(relative_path, config.dify_image_cache_dir)
+
+            cache_dir = store.get_cache_dir("nonebot_plugin_dify")
+            save_dir = os.path.join(cache_dir, config.dify_image_cache_dir)
+
             _img_path = save_pic(_img_bytes, _img, save_dir)
             memory.USER_IMAGE_CACHE[session_id] = {
                         "id": _img.id,

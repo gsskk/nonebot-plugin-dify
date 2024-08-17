@@ -34,16 +34,17 @@
 
 在 nonebot2 项目的`.env`文件中添加下表中的配置
 
-| 配置项 | 必填 | 默认值 | 说明 |
-|:-----:|:----:|:----:|:----:|
-| DIFY_API_BASE | 否 | https://api.dify.ai/v1 | DIFY API地址，支持自建 |
-| DIFY_API_KEY | 是 | 无 | DIFY API KEY |
-| DIFY_APP_TYPE | 否 | chatbot | DIFY APP 类型 |
-| DIFY_IMAGE_UPLOAD_ENABLE | 否 | False | 是否开启上传图片，需要LLM模型支持图片识别<br />注意暂不支持`DISCORD` |
-| DIFY_EXPIRES_IN_SECONDS | 否 | 3600 | 会话过期时间 |
+| 配置项 | 必填 | 默认值 |                                 说明                                 |
+|:-----:|:----:|:----:|:------------------------------------------------------------------:|
+| DIFY_API_BASE | 否 | https://api.dify.ai/v1 |                          DIFY API地址，支持自建                           |
+| DIFY_API_KEY | 是 | 无 |                            DIFY API KEY                            |
+| DIFY_APP_TYPE | 否 | chatbot |                            DIFY APP 类型                             |
+| DIFY_IMAGE_UPLOAD_ENABLE | 否 | False | 是否开启上传图片，需要LLM模型支持图片识别，<br />同时需要nonebot_plugin_alconna支持相应Adapter |
+| DIFY_EXPIRES_IN_SECONDS | 否 | 3600 |                               会话过期时间                               |
 
 ## 🎉 使用
 ### 对接不同Bot的例子
+具体支持哪些平台请参考[nonebot_plugin_alconna](https://github.com/nonebot/plugin-alconna)
 
 .env
 
@@ -54,7 +55,7 @@ ONEBOT_ACCESS_TOKEN=xxxxxx
 # 对接`TELEGRAM`
 TELEGRAM_BOTS=[{"token": "1111:xxxx"}]
 
-# 对接`DISCORD`
+# 对接`DISCORD`，注意不支持图片上传功能
 DISCORD_BOTS=[{"token": "xxxxxxxxxxxxx"}]
 ```
 
