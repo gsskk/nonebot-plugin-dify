@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nonebot-plugin-dify"
+version = "0.1.8"
+description = "A Nonebot plugin for interacting with Dify"
+readme = "README.md"
+requires-python = ">=3.10"
+
+authors = [
+    { name = "gsskk", email = "your.email@example.com" }
+]
+license = { file = "LICENSE" }  # 许可证文件
+
+# 项目的分类
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+
+# 项目的依赖项
+dependencies = [
+    "nonebot2>=2.3.0",
+    "nonebot-plugin-alconna>=0.50.2",
+    "nonebot-plugin-localstore>=0.7.0",
+    "nonebot-plugin-apscheduler>=0.5.0",
+    "httpx>=0.27.0",
+    "cachetools>=6.2.0",
+]
+
+[project.urls]
+"Homepage" = "https://github.com/gsskk/nonebot-plugin-dify"
+"Documentation" = "https://github.com/gsskk/nonebot-plugin-dify/blob/main/README.md"
+"Issue Tracker" = "https://github.com/gsskk/nonebot-plugin-dify/issues"
+
+[tool.setuptools]
+packages = ["nonebot_plugin_dify"]
+
+[tool.ruff]
+line-length = 120
+ignore = ["E402"]
