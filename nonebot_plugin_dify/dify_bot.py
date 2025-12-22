@@ -1,6 +1,7 @@
 import json
 import mimetypes
 import os
+import re
 
 import httpx
 from nonebot import logger
@@ -344,6 +345,7 @@ class DifyBot:
                     logger.warning("Dify returned empty answer")
                     return [ReplyType.TEXT], ["Dify返回为空，请检查 Dify 应用配置。"]
 
+                answer = self._clean_content(answer)
                 parsed_content = parse_markdown_text(answer)
                 replies_type, replies_context = self._parse_replies(parsed_content)
 
@@ -464,6 +466,7 @@ class DifyBot:
                     logger.warning("Dify workflow returned empty response")
                     return [ReplyType.TEXT], ["Dify-Workflow 未返回任何内容，请检查工作流配置。"]
 
+                reply_content = self._clean_content(reply_content)
                 return [ReplyType.TEXT], [reply_content]
 
             except (json.JSONDecodeError, KeyError) as e:
@@ -508,6 +511,18 @@ class DifyBot:
                 replies_type.append(ReplyType.IMAGE_URL)
                 replies_context.append(msg["content"]["url"])
         return replies_type, replies_context
+
+    def _clean_content(self, content: str) -> str:
+        """
+        Clean the content returned by Dify.
+        Specifically removes <think>...</think> blocks that might be returned by reasoning models.
+        """
+        if not content:
+            return ""
+        # 移除 <think> 标签及其内容。虽然 reasoning model 通常将其放在开头（前缀），
+        # 但全局替换更安全，防止异常情况泄露思维链。
+        # 使用 strip() 去除可能残留的首尾空白字符。
+        return re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
 
     def _extract_adapter_name(self, full_user_id: str) -> str:
         return full_user_id.split("+")[0] if full_user_id else "unknown"
@@ -594,11 +609,13 @@ class DifyBot:
 
     def _append_agent_message(self, accumulated_agent_message, merged_message):
         if accumulated_agent_message:
-            merged_message.append({"type": "agent_message", "content": accumulated_agent_message})
+            cleaned_message = self._clean_content(accumulated_agent_message)
+            if cleaned_message:
+                merged_message.append({"type": "agent_message", "content": cleaned_message})
 
-    def _parse_sse_event(self, line: bytes):
+    def _parse_sse_event(self, line: str):
         try:
-            decoded_line = line.decode("utf-8")
+            decoded_line = line
             if decoded_line.startswith("data:"):
                 return json.loads(decoded_line[5:])
         except (json.JSONDecodeError, UnicodeDecodeError):
