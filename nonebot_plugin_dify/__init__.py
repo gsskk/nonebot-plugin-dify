@@ -18,6 +18,7 @@ import importlib
 import re
 
 from .config import Config, config
+from . import session as session_manager
 from .dify_bot import DifyBot
 from .common.reply_type import ReplyType
 from .common import record_manager, chat_recorder, group_memory_manager
@@ -424,6 +425,12 @@ async def handle_message(bot: Bot, event: Event):
         except Exception as e:
             logger.warning(f"Failed to handle message images: {e}")
 
+        # 提取被提到（At）的用户 ID
+        at_user_ids = []
+        if uni_msg.has(alconna.At):
+            for seg in uni_msg[alconna.At]:
+                at_user_ids.append(str(seg.target))
+
         # 获取回复并发送
         try:
             await send_reply_message(
@@ -437,6 +444,7 @@ async def handle_message(bot: Bot, event: Event):
                 personalization_enabled,
                 replied_message=replied_message,
                 replied_image_path=replied_image_path,
+                at_user_ids=at_user_ids,
             )
         except FinishedException:
             raise
@@ -561,6 +569,7 @@ async def send_reply_message(
     personalization_enabled: bool = False,
     replied_message: alconna.UniMessage = None,
     replied_image_path: str = None,
+    at_user_ids: list[str] = None,
 ) -> None:
     """发送回复消息"""
     user_id = event.get_user_id() or "user"
@@ -574,6 +583,7 @@ async def send_reply_message(
             personalization_enabled,
             replied_message=replied_message,
             replied_image_path=replied_image_path,
+            at_user_ids=at_user_ids,
         )
 
         # 构建回复消息
@@ -653,7 +663,7 @@ async def handle_clear(event: Event, bot: Bot):
     session_id = f"s-{full_user_id}"
 
     logger.debug(f"Clear session: {session_id}.")
-    dify_bot.sessions.clear_session(session_id)
+    session_manager.clear_session(session_id)
 
     _uni_message = alconna.UniMessage("你的上下文已被清理！")
 

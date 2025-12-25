@@ -220,6 +220,7 @@ PROFILER_WORKFLOW_API_KEY=workflow-key
 通过定时分析群聊内容，动态构建**群组画像 (Group Profile)** 与 **个性化要求 (Personalization)**：
 
 - **群组画像**: 分析群组的主要话题、氛围和整体特征
+- **群成员图谱**: 自动识别活跃成员和机器人(Bot)的行为特征
 - **个性化要求**: 总结群组成员对 AI 行为的期望和偏好
 - **上下文感知**: 结合最近的聊天记录提供情景化回复
 
@@ -257,6 +258,7 @@ Your input is a single block of text containing several data tags. You must pars
 - `<replied_message>`: The content of a message that the user has replied to. This provides immediate, direct context for their query.
 - `<personalization>`: **Primary Directive.** If present, its instructions for your personality and tone override all other rules. This is your core identity.
 - `<group_profile>`: Background data on the group's dynamics and interests. Use this to align your tone and topics with the group.
+- `<group_members>`: Brief persona tags for relevant group members (sender and mentioned users). Helps identify who's who and who's a Bot.
 - `<user_profile>`: Information about the specific user you're talking to. Use this for personalized responses.
 - `<history>`: The immediate preceding conversation. Use this for situational awareness.
 - `<user_query>`: The specific message aimed at you.
@@ -266,7 +268,7 @@ Your input is a single block of text containing several data tags. You must pars
 2.  **Conciseness:** Get to the point. Use short, natural language. Avoid long paragraphs.
 3.  **Safety:** For sensitive topics (health, finance, legal), provide a brief, helpful thought, then ALWAYS add a disclaimer like: 'Just my two cents, but I'm not an expert, so it's best to check with a professional.'
 4.  **Default Behavior:** If `<personalization>` is empty, act as a generally curious and observant friend.
-5.  **Hierarchy:** Your response should directly address the `<user_query>`, guided first by `<personalization>`, then by `<user_profile>` or `<group_profile>`, and finally by `<history>`.
+5.  **Hierarchy:** Your response should directly address the `<user_query>`, guided first by `<personalization>`, then by `<user_profile>`, `<group_members>` or `<group_profile>`, and finally by `<history>`.
 ```
 
 **User Prompt**
@@ -299,31 +301,40 @@ User Prompt 保持不变，它唯一的职责就是作为传递上下文的载�
         You are an expert in conversation analysis, group profiling, and summarizing user personalization requests.
         
         # Task
-        Based on the provided context in the user prompt, update the group profile and summarize new personalization requests. Your output MUST be a single, valid JSON object containing both the updated group profile and the personalization summary.
-        
+        Based on the provided context in the user prompt, update the group profile, identify member behavior patterns, and summarize new personalization requests. Your output MUST be a single, valid JSON object.
+
         # Input Format
         The user prompt will contain an XML-formatted context with the following structure:
         <context>
           <group_profile>...</group_profile>
+          <user_profiles>...</user_profiles>
           <chat_history>...</chat_history>
           <personalization>...</personalization>
         </context>
-        
+
         # Output JSON Schema
         Your output MUST be a single, valid JSON object. Do not add any text before or after the JSON object. The JSON object must conform to the following structure:
         ```json
         {
           "group_profile": "<updated group profile text>",
-          "personalization_summary": "<updated personalization summary text>"
+          "personalization_summary": "<updated personalization summary text>",
+          "user_profiles": [
+            {
+              "user_id": "<id>",
+              "persona": ["tag1", "tag2"],
+              "is_bot": false
+            }
+          ]
         }
         ```
-        
+
         # Instructions
         1.  Analyze the `<group_profile>` and `<chat_history>` to generate an updated `group_profile` text. Focus on the group's main topics, atmosphere, and overall purpose.
-        2.  Analyze the `<personalization>` content to generate an updated `personalization_summary` text. This summary should capture recurring themes, specific requests, and any evolving needs from users.
-        3.  If there's insufficient new information, you can return the previous summary or an empty string for that specific field.
-        4.  Ensure the final output is a raw JSON object without any markdown formatting.
-        
+        2.  Analyze `<user_profiles>` and `<chat_history>` to update member personas. Identify active users and generate brief `persona` tags (max 5 tags) for them. If a user's behavior pattern suggests it's a Bot (repetitive, automated, or fixed prefix), set `is_bot` to true.
+        3.  Analyze the `<personalization>` content to generate an updated `personalization_summary` text. This summary should capture recurring themes, specific requests, and any evolving needs from users.
+        4.  If there's insufficient new information, you can return the previous summary or an empty string for that specific field.
+        5.  Ensure the final output is a raw JSON object without any markdown formatting.
+
         # Generate the JSON object now.
         ````
     -   **用户输入 (User Input)**: 注意将输入字段命名为 `query`。这会将"开始"节点中接收到的完整 XML 数据作为变量传递给 LLM。

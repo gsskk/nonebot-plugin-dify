@@ -1,7 +1,7 @@
 import json
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Optional, List, Any
 import httpx
 import re
 
@@ -13,7 +13,7 @@ from ..config import Config
 
 # from ..dify_client import DifyClient
 from .chat_recorder import get_messages_since, get_at_bot_messages_since, limit_chat_history_length
-from .group_data_store import group_profile_memory, personalization_memory
+from .group_data_store import group_profile_memory, personalization_memory, group_user_memory
 
 plugin_config = get_plugin_config(Config)
 
@@ -114,6 +114,21 @@ class GroupMemoryManager:
         all_chat_messages = await get_messages_since(self.adapter_name, str(group_id), start_time)
         at_bot_messages = await get_at_bot_messages_since(self.adapter_name, str(group_id), start_time, self.bot_name)
 
+        # 提取聊天记录中涉及的用户 ID 并获取其现有画像
+        involved_user_ids = {str(msg["user_id"]) for msg in all_chat_messages} | {
+            str(msg["user_id"]) for msg in at_bot_messages
+        }
+        user_profiles_xml = ""
+        if involved_user_ids:
+            profiles_list = []
+            for uid in involved_user_ids:
+                info = group_user_memory.get_user_profile(self.adapter_name, group_id, uid)
+                if info:
+                    is_bot_str = " (Bot)" if info.get("is_bot") else ""
+                    persona = ", ".join(info.get("persona", []))
+                    profiles_list.append(f"- {uid}{is_bot_str}: {persona}")
+            user_profiles_xml = "\n".join(profiles_list)
+
         # 将消息转换为可读的字符串格式
         chat_lines = [
             f"[{msg['timestamp']}] {msg['nickname']}({msg['user_id']}): {msg['message']}" for msg in all_chat_messages
@@ -129,6 +144,10 @@ class GroupMemoryManager:
 <group_profile>
 {old_group_profile}
 </group_profile>
+
+<user_profiles>
+{user_profiles_xml}
+</user_profiles>
 
 <chat_history>
 {chat_history_str}
@@ -183,6 +202,7 @@ class GroupMemoryManager:
                     parsed_result = json.loads(cleaned_result)
                     new_group_profile = parsed_result.get("group_profile", "")
                     new_personalization_summary = parsed_result.get("personalization_summary", "")
+                    user_profiles = parsed_result.get("user_profiles", [])
 
                     if new_group_profile:
                         group_profile_memory.set(self.adapter_name, group_id, new_group_profile)
@@ -195,6 +215,12 @@ class GroupMemoryManager:
                         logger.info(f"群组 {group_id} 个性化要求总结更新成功。")
                     else:
                         logger.warning(f"Dify Workflow 未返回新的个性化要求总结，群组 {group_id} 个性化要求未更新。")
+
+                    # Update User Profiles
+                    if user_profiles:
+                        self._process_user_profiles(group_id, user_profiles)
+                    else:
+                        logger.warning("Dify Workflow 未返回用户画像列表。")
 
                 except json.JSONDecodeError:
                     logger.error(f"Dify Workflow 返回的输出不是有效的 JSON 格式：{result}")
@@ -210,3 +236,31 @@ class GroupMemoryManager:
 
         logger.info(f"群组 {group_id} 的画像和个性化要求更新流程结束。")
         return
+
+    def _process_user_profiles(self, group_id: str, user_profiles: List[Dict[str, Any]]):
+        """Processes and saves user profiles extracted from Dify Workflow response."""
+        if not isinstance(user_profiles, list):
+            logger.warning(f"user_profiles expected list, got {type(user_profiles)}")
+            return
+
+        now_str = datetime.now().isoformat()
+        for profile in user_profiles:
+            try:
+                user_id = profile.get("user_id")
+                if not user_id:
+                    continue
+
+                # Ensure persona is a list of strings
+                persona = profile.get("persona", [])
+                if isinstance(persona, str):
+                    persona = [persona]
+                elif not isinstance(persona, list):
+                    persona = []
+
+                is_bot = profile.get("is_bot", False)
+
+                group_user_memory.update_user_profile(
+                    self.adapter_name, group_id, str(user_id), persona, bool(is_bot), now_str
+                )
+            except Exception as e:
+                logger.warning(f"Failed to process user profile for group {group_id}: {e}")

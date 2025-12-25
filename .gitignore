@@ -172,7 +172,10 @@ pyrightconfig.json
 
 # Custom
 specs/
+openspec/
+.claude/
 bak/
+AGENTS.md
 CLAUDE.md
 GEMINI.md
 uv.lock

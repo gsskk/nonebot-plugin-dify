@@ -2,6 +2,7 @@ import json
 import mimetypes
 import os
 import re
+from typing import List, Optional, Tuple
 
 import httpx
 from nonebot import logger
@@ -13,7 +14,7 @@ from .dify_client import DifyClient, ChatClient
 from .common.utils import parse_markdown_text
 from .common.reply_type import ReplyType
 from .common import chat_recorder, record_manager, group_memory_manager
-from .common.group_data_store import group_profile_memory, personalization_memory
+from .common.group_data_store import group_profile_memory, personalization_memory, group_user_memory
 from .cache import USER_IMAGE_CACHE
 from .common import private_chat_manager, private_chat_recorder
 from .common.user_data_store import user_profile_memory, user_personalization_memory
@@ -31,6 +32,7 @@ class DifyBot:
         personalization_enabled: bool = False,
         replied_message: alconna.UniMessage = None,
         replied_image_path: str = None,
+        at_user_ids: Optional[List[str]] = None,
     ):
         logger.info(f"[DIFY] query={query.strip()}")
         logger.debug(f"[DIFY] dify_user={full_user_id}")
@@ -46,6 +48,7 @@ class DifyBot:
                 personalization_enabled,
                 replied_message=replied_message,
                 replied_image_path=replied_image_path,
+                at_user_ids=at_user_ids,
             )
 
             if not _reply_type_list:
@@ -66,6 +69,7 @@ class DifyBot:
         personalization_enabled: bool = False,
         replied_message=None,
         replied_image_path: str = None,
+        at_user_ids: Optional[List[str]] = None,
     ):
         try:
             session_manager.count_user_message(session)  # 限制一个conversation中消息数
@@ -94,7 +98,12 @@ class DifyBot:
                         os.remove(replied_image_path)
 
             final_query, conversation_id = await self._build_final_query(
-                query, full_user_id, session, personalization_enabled, replied_message=replied_message
+                query,
+                full_user_id,
+                session,
+                personalization_enabled,
+                replied_message=replied_message,
+                at_user_ids=at_user_ids,
             )
 
             if dify_app_type in ("chatbot", "chatflow"):
@@ -129,7 +138,8 @@ class DifyBot:
         session: session_manager.Session,
         personalization_enabled: bool = False,
         replied_message=None,
-    ) -> (str, str):
+        at_user_ids: Optional[List[str]] = None,
+    ) -> Tuple[str, Optional[str]]:
         """构建包含画像和历史记录的最终查询字符串"""
         adapter_name = self._extract_adapter_name(full_user_id)
         group_id = self._extract_group_id(full_user_id)
@@ -159,9 +169,9 @@ class DifyBot:
             return query, conversation_id
 
         # --- 加载画像 ---
-        user_profile_str = ""
         group_profile_str = ""
         personalization_str = ""
+        group_members_str = ""
 
         # Check if group personalization is enabled
         group_profiler_enabled = group_memory_manager.get_profiler_status(adapter_name, group_id)
@@ -172,19 +182,30 @@ class DifyBot:
             user_has_private_personalization = private_chat_manager.get_personalization_status(adapter_name, user_id)
 
         if group_profiler_enabled:
-            # 用户画像暂时移除
-            # user_profile = profile_manager.load_user_profile(adapter_name, user_id)
-            # if user_profile:
-            #     user_profile_str = (
-            #         f"<user_profile>\n{json.dumps(user_profile, ensure_ascii=False, indent=2)}\n</user_profile>\n"
-            #     )
-
             group_profile = group_profile_memory.get(adapter_name, group_id)
             if group_profile:
                 group_profile_str = f"<group_profile>\n{group_profile}\n</group_profile>\n"
 
+            # 注入群成员图谱 (Group Member Graph)
+            try:
+                relevant_user_ids = {user_id}
+                if at_user_ids:
+                    relevant_user_ids.update(at_user_ids)
+
+                member_profiles = []
+                for uid in relevant_user_ids:
+                    profile = group_user_memory.get_user_profile(adapter_name, group_id, str(uid))
+                    if profile:
+                        persona_tags = ", ".join(profile.get("persona", []))
+                        is_bot_suffix = " (Bot)" if profile.get("is_bot") else ""
+                        member_profiles.append(f"- {uid}{is_bot_suffix}: {persona_tags}")
+
+                if member_profiles:
+                    group_members_str = "<group_members>\n" + "\n".join(member_profiles) + "\n</group_members>\n"
+            except Exception as e:
+                logger.warning(f"Failed to build group members context: {e}")
+
             # Handle personalization priority: private personalization takes precedence in group chats
-            # if the user has both private and group personalization
             if user_has_private_personalization:
                 # Use private personalization data in group chat if available
                 private_personalization = user_personalization_memory.get(adapter_name, user_id)
@@ -235,16 +256,16 @@ class DifyBot:
 
         # --- 组合最终查询 ---
         current_query = f"{user_id}: {query}"
-        final_query = f"{user_profile_str}{group_profile_str}{personalization_str}{history_str}{replied_message_str}<user_query>\n{current_query}\n</user_query>"
+        final_query = f"{group_members_str}{group_profile_str}{personalization_str}{history_str}{replied_message_str}<user_query>\n{current_query}\n</user_query>"
 
         logger.debug(
-            f"[DIFY] 已拼接上下文到查询 (含画像: {bool(user_profile_str or group_profile_str or personalization_str)})"
+            f"[DIFY] 已拼接上下文到查询 (含成员画像: {bool(group_members_str)}, 含群画像: {bool(group_profile_str)})"
         )
         return final_query, conversation_id
 
     async def _build_private_chat_query(
         self, query: str, adapter_name: str, user_id: str, conversation_id: str
-    ) -> (str, str):
+    ) -> Tuple[str, Optional[str]]:
         """构建私聊个性化查询字符串"""
         try:
             # --- 加载用户画像和个性化数据 ---
@@ -485,7 +506,7 @@ class DifyBot:
             logger.error(f"Unexpected error in workflow handler: {e}")
             return [ReplyType.TEXT], ["处理 Dify-Workflow 回复时遇到未知错误。"]
 
-    def _parse_replies(self, parsed_content: list) -> (list, list):
+    def _parse_replies(self, parsed_content: list) -> Tuple[list, list]:
         replies_type = []
         replies_context = []
         for item in parsed_content:
@@ -500,7 +521,7 @@ class DifyBot:
             replies_context.append(content_map.get(item_type, item["content"]))
         return replies_type, replies_context
 
-    def _parse_agent_replies(self, msgs: list) -> (list, list):
+    def _parse_agent_replies(self, msgs: list) -> Tuple[list, list]:
         replies_type = []
         replies_context = []
         for msg in msgs:
@@ -621,3 +642,6 @@ class DifyBot:
         except (json.JSONDecodeError, UnicodeDecodeError):
             return None
         return None
+
+
+dify_bot: DifyBot = DifyBot()
