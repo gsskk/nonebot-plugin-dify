@@ -33,6 +33,7 @@ class DifyBot:
         replied_message: alconna.UniMessage = None,
         replied_image_path: str = None,
         at_user_ids: Optional[List[str]] = None,
+        is_linger: bool = False,
     ):
         logger.info(f"[DIFY] query={query.strip()}")
         logger.debug(f"[DIFY] dify_user={full_user_id}")
@@ -49,11 +50,24 @@ class DifyBot:
                 replied_message=replied_message,
                 replied_image_path=replied_image_path,
                 at_user_ids=at_user_ids,
+                is_linger=is_linger,
             )
 
             if not _reply_type_list:
+                # Linger mode silent handling
+                if is_linger:
+                    logger.debug("Linger mode: suppressed empty response.")
+                    return [], []
+
                 logger.warning(f"Failed to process reply: {_reply_content_list}")
                 return [ReplyType.TEXT], [""]
+
+            # Check for <IGNORE> token if lingering
+            if is_linger and _reply_type_list == [ReplyType.TEXT] and len(_reply_content_list) == 1:
+                content = _reply_content_list[0].strip()
+                if not content or "<IGNORE>" in content:
+                    logger.debug("Linger mode: suppressed response due to empty content or <IGNORE> token.")
+                    return [], []
 
             return _reply_type_list, _reply_content_list
 
@@ -70,6 +84,7 @@ class DifyBot:
         replied_message=None,
         replied_image_path: str = None,
         at_user_ids: Optional[List[str]] = None,
+        is_linger: bool = False,
     ):
         try:
             session_manager.count_user_message(session)  # 限制一个conversation中消息数

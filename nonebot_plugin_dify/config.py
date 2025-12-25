@@ -169,6 +169,16 @@ class Config(BaseModel):
     private_data_retention_days: int = 90
     """私聊用户数据保留天数，超过此时间的数据将被自动清理"""
 
+    # Linger Mode
+    linger_mode_enable: bool = False
+    """是否启用Linger模式（被提及后一段时间内无需@也能回复）"""
+
+    linger_timeout_seconds: int = 60
+    """Linger模式持续时间，单位秒"""
+
+    linger_max_messages: int = 5
+    """Linger模式下连续回复的最大消息数"""
+
     # API Optimization
     api_max_retries: int = 3
     """API调用最大重试次数"""

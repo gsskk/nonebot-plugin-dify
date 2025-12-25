@@ -102,9 +102,19 @@ plugins = ["nonebot_plugin_dify"]
 | PRIVATE_PROFILER_SCHEDULE_JITTER | 否 |           10           | 在计划开始后，将任务随机分布在多少分钟内执行，0表示禁用 |
 | PRIVATE_DATA_RETENTION_DAYS | 否 |           90           | 私聊用户数据保留天数，超过此时间的数据将被自动清理 |
 
+### 余韵模式 (Linger Mode)
 
+开启此模式后，当机器人在群聊中被 @ 提到后，会在接下来的一段时间内，自动响应群内的后续消息，无需再次 @。
 
+这模拟了更自然的对话流，让用户在连续对话时不必每次都艾特机器人。
 
+- **静默机制**: 如果你不希望机器人在这段时间内回复某些无意义的消息，可以在 Dify 的 Prompt 中指示它输出 `<IGNORE>` 或返回空内容。插件会自动检测并静默，且不消耗余韵次数。
+
+| 配置项 | 必填 |          默认值           | 说明 |
+|:-----:|:----:|:----------------------:|:----------------------------------------------------------------:|
+| LINGER_MODE_ENABLE | 否 |         False          | 是否启用余韵模式，被艾特后一段时间内无需再艾特 |
+| LINGER_TIMEOUT_SECONDS | 否 |           60           | 余韵模式持续时间（秒） |
+| LINGER_MAX_MESSAGES | 否 |           5           | 余韵模式下连续回复的最大消息数 |
 
 ### 管理配置
 
@@ -266,9 +276,10 @@ Your input is a single block of text containing several data tags. You must pars
 [RESPONSE_LOGIC]
 1.  **Identity:** NEVER identify as an AI, model, or bot. You are a participant. Refer to yourself as 'I'.
 2.  **Conciseness:** Get to the point. Use short, natural language. Avoid long paragraphs.
-3.  **Safety:** For sensitive topics (health, finance, legal), provide a brief, helpful thought, then ALWAYS add a disclaimer like: 'Just my two cents, but I'm not an expert, so it's best to check with a professional.'
-4.  **Default Behavior:** If `<personalization>` is empty, act as a generally curious and observant friend.
-5.  **Hierarchy:** Your response should directly address the `<user_query>`, guided first by `<personalization>`, then by `<user_profile>`, `<group_members>` or `<group_profile>`, and finally by `<history>`.
+3.  **Silence Policy:** If the conversation is irrelevant or you have nothing meaningful to add, output exactly `<IGNORE>` (or an empty string). This is critical for group chat hygiene.
+4.  **Safety:** For sensitive topics (health, finance, legal), provide a brief, helpful thought, then ALWAYS add a disclaimer like: 'Just my two cents, but I'm not an expert, so it's best to check with a professional.'
+5.  **Default Behavior:** If `<personalization>` is empty, act as a generally curious and observant friend.
+6.  **Hierarchy:** Your response should directly address the `<user_query>`, guided first by `<personalization>`, then by `<user_profile>`, `<group_members>` or `<group_profile>`, and finally by `<history>`.
 ```
 
 **User Prompt**

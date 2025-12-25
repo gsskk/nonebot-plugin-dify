@@ -16,6 +16,7 @@ from nonebot.permission import SUPERUSER, Permission
 from typing import List
 import importlib
 import re
+import time
 
 from .config import Config, config
 from . import session as session_manager
@@ -375,6 +376,10 @@ async def handle_message(bot: Bot, event: Event):
         full_user_id = get_full_user_id(event, bot)
         session_id = f"s-{full_user_id}"
 
+        # Pre-fetch session to check linger state
+        session = session_manager.get_session(session_id, full_user_id)
+        is_linger = False
+
         # 处理私聊消息
         if target.private:
             # 检查是否启用私聊个性化功能
@@ -406,6 +411,28 @@ async def handle_message(bot: Bot, event: Event):
                     if str(seg.target) == str(bot.self_id):
                         is_mentioned = True
                         break
+
+            # --- Linger Mode Logic ---
+            if not is_mentioned and config.linger_mode_enable:
+                # Check time since last interaction
+                time_since_last = time.time() - session.last_interaction_time
+                if time_since_last < config.linger_timeout_seconds:
+                    # Check message count limit
+                    if session.linger_message_count < config.linger_max_messages:
+                        logger.debug(
+                            f"Linger mode active: {time_since_last:.1f}s since last interaction, count {session.linger_message_count}"
+                        )
+                        is_mentioned = True
+                        is_linger = True
+
+            # If triggered, update session state
+            if is_mentioned:
+                session.last_interaction_time = time.time()
+                if is_linger:
+                    session.linger_message_count += 1
+                else:
+                    session.linger_message_count = 0  # Reset on explicit mention
+
             # 记录群消息（无论是否@机器人）
             try:
                 await record_group_message(target, event, uni_msg, bot, user_id, adapter_name, is_mentioned)
@@ -445,6 +472,7 @@ async def handle_message(bot: Bot, event: Event):
                 replied_message=replied_message,
                 replied_image_path=replied_image_path,
                 at_user_ids=at_user_ids,
+                is_linger=is_linger,
             )
         except FinishedException:
             raise
@@ -570,6 +598,7 @@ async def send_reply_message(
     replied_message: alconna.UniMessage = None,
     replied_image_path: str = None,
     at_user_ids: list[str] = None,
+    is_linger: bool = False,
 ) -> None:
     """发送回复消息"""
     user_id = event.get_user_id() or "user"
@@ -584,7 +613,13 @@ async def send_reply_message(
             replied_message=replied_message,
             replied_image_path=replied_image_path,
             at_user_ids=at_user_ids,
+            is_linger=is_linger,
         )
+
+        # 检查是否为静默回复（Linger Mode）
+        if not reply_type and not reply_content:
+            logger.debug("Suppressing silent reply.")
+            return
 
         # 构建回复消息
         try:
