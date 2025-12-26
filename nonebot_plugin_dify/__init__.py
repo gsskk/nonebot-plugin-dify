@@ -274,10 +274,10 @@ receive_message: type[Matcher] = on_message(
 )
 
 # 监听 /clear 命令
-clear_command = on_command("clear", priority=90, block=True)
+clear_command = on_command("clear", force_whitespace=True, priority=90, block=True)
 
 # 监听 /help 命令
-help_command = on_command("help", priority=90, block=True)
+help_command = on_command("help", force_whitespace=True, priority=90, block=True)
 
 # 监听 /record [on/off] 命令
 record_command = alconna.on_alconna(
@@ -295,7 +295,7 @@ profiler_command = alconna.on_alconna(
     permission=MULTI_PLATFORM_PERM,
     use_cmd_start=True,
     auto_send_output=True,
-    priority=90,
+    priority=89,
     block=True,
 )
 
@@ -309,7 +309,7 @@ personalize_command = alconna.on_alconna(
 )
 
 # 监听 /profile 命令
-profile_command = on_command("profile", priority=90, block=True)
+profile_command = on_command("profile", force_whitespace=True, priority=90, block=True)
 
 # 监听 /reset_profile 命令
 reset_profile_command = alconna.on_alconna(
@@ -324,6 +324,7 @@ reset_profile_command = alconna.on_alconna(
 get_my_id_command = on_command(
     "get_my_id",
     rule=to_me(),
+    force_whitespace=True,
     priority=90,
     block=True,
 )
@@ -377,8 +378,14 @@ async def handle_message(bot: Bot, event: Event):
         session_id = f"s-{full_user_id}"
 
         # Pre-fetch session to check linger state
-        session = session_manager.get_session(session_id, full_user_id)
+        # session = session_manager.get_session(session_id, full_user_id)
         is_linger = False
+
+        # Pre-fetch Group State (if not private)
+        group_state = None
+        if not target.private:
+            group_state_id = f"{adapter_name}+{target.id}"
+            group_state = session_manager.get_group_state(group_state_id)
 
         # 处理私聊消息
         if target.private:
@@ -412,36 +419,38 @@ async def handle_message(bot: Bot, event: Event):
                         is_mentioned = True
                         break
 
-            # --- Priority 2: Linger Mode Check ---
-            if not is_mentioned and config.linger_mode_enable:
-                time_since_last = time.time() - session.last_interaction_time
-                if time_since_last < config.linger_timeout_seconds:
-                    if session.linger_message_count < config.linger_max_messages:
-                        logger.debug(
-                            f"Linger mode active: {time_since_last:.1f}s since last, count {session.linger_message_count}"
-                        )
-                        is_mentioned = True
-                        is_linger = True
+            # --- Priority 2: Linger Mode Check (Group Wide) ---
+            if not is_mentioned and config.linger_mode_enable and group_state:
+                if group_state.last_interaction_time > 0:  # Only linger if we actually had a previous interaction
+                    time_since_last = time.time() - group_state.last_interaction_time
+                    if time_since_last < config.linger_timeout_seconds:
+                        if group_state.linger_message_count < config.linger_max_messages:
+                            logger.debug(
+                                f"Linger mode active: {time_since_last:.1f}s since last, count {group_state.linger_message_count}"
+                            )
+                            is_mentioned = True
+                            is_linger = True
 
             # --- Handle Active Triggers (At or Linger) ---
             if is_mentioned:
                 # 1. Cancel any pending proactive task because the conversation is now active
-                if session.proactive_pending_task_id:
+                if group_state and group_state.proactive_pending_task_id:
                     try:
-                        scheduler.remove_job(session.proactive_pending_task_id)
+                        scheduler.remove_job(group_state.proactive_pending_task_id)
                         logger.debug(
-                            f"Cancelled proactive task due to active mention: {session.proactive_pending_task_id}"
+                            f"Cancelled proactive task due to active mention: {group_state.proactive_pending_task_id}"
                         )
                     except Exception:
                         pass
-                    session.proactive_pending_task_id = ""
+                    group_state.proactive_pending_task_id = ""
 
-                # 2. Update session state
-                session.last_interaction_time = time.time()
-                if is_linger:
-                    session.linger_message_count += 1
-                else:
-                    session.linger_message_count = 0  # Reset on explicit mention
+                # 2. Update group state
+                if group_state:
+                    group_state.last_interaction_time = time.time()
+                    if is_linger:
+                        group_state.linger_message_count += 1
+                    else:
+                        group_state.linger_message_count = 0  # Reset on explicit mention
 
                 # 3. Record and proceed to reply
                 try:
@@ -452,15 +461,15 @@ async def handle_message(bot: Bot, event: Event):
             # --- Priority 3: Proactive Intervention Check (Only if not mentioned) ---
             else:
                 # 1. Any incoming message breaks the silence, so cancel pending tasks
-                if session.proactive_pending_task_id:
+                if group_state and group_state.proactive_pending_task_id:
                     try:
-                        scheduler.remove_job(session.proactive_pending_task_id)
+                        scheduler.remove_job(group_state.proactive_pending_task_id)
                         logger.debug(
-                            f"Reset silence watcher because someone spoke: {session.proactive_pending_task_id}"
+                            f"Reset silence watcher because someone spoke: {group_state.proactive_pending_task_id}"
                         )
                     except Exception:
                         pass
-                    session.proactive_pending_task_id = ""
+                    group_state.proactive_pending_task_id = ""
 
                 # 2. Record the message (as a normal non-mention message)
                 try:
@@ -469,31 +478,38 @@ async def handle_message(bot: Bot, event: Event):
                     logger.warning(f"Failed to record group message: {e}")
 
                 # 3. Check if we should start a new proactive observation
-                if config.proactive_mode_enable:
-                    # Cooldown check (using last_interaction_time to ensure we don't jump into fresh conversations)
-                    time_since_last = time.time() - session.last_interaction_time
+                if config.proactive_mode_enable and group_state:
+                    # Cooldown check: Use max(last_interaction_time, created_at) to ensure
+                    # a full cooldown period after bot restart or first sight of group.
+                    reference_time = max(group_state.last_interaction_time, group_state.created_at)
+                    time_since_last = time.time() - reference_time
+
                     if time_since_last > config.proactive_cooldown_seconds:
                         from .common.semantic_matcher import semantic_matcher
 
                         if semantic_matcher.check_relevance(msg_text):
                             trigger_time = time.time() + config.proactive_silence_waiting_seconds
-                            job_id = f"proactive_trigger_{session.id}_{int(time.time())}"
+                            job_id = f"proactive_trigger_{group_state_id}_{int(time.time())}"
 
                             async def _proactive_callback(
                                 bot_ref=bot,
                                 event_ref=event,
-                                session_ref=session,
                                 uni_msg_ref=uni_msg,
                                 full_user_id_ref=full_user_id,
                                 session_id_ref=session_id,
+                                group_state_id_ref=group_state_id,
                                 target_ref=target,
                                 adapter_name_ref=adapter_name,
                             ):
-                                logger.info(f"Proactive intervention triggered for session {session_id_ref}")
+                                logger.info(f"Proactive intervention triggered for group {group_state_id_ref}")
+                                # Fetch fresh group state
+                                gs = session_manager.get_group_state(group_state_id_ref)
+
                                 # Mark as active to enforce cooldown
-                                session_ref.last_interaction_time = time.time()
-                                session_ref.proactive_last_trigger_time = time.time()
-                                session_ref.proactive_pending_task_id = ""
+                                gs.last_interaction_time = time.time()
+                                gs.proactive_last_trigger_time = time.time()
+                                gs.proactive_pending_task_id = ""
+
                                 msg_text = uni_msg_ref.extract_plain_text()
                                 try:
                                     await send_reply_message(
@@ -515,7 +531,7 @@ async def handle_message(bot: Bot, event: Event):
                             scheduler.add_job(
                                 _proactive_callback, "date", run_date=datetime.fromtimestamp(trigger_time), id=job_id
                             )
-                            session.proactive_pending_task_id = job_id
+                            group_state.proactive_pending_task_id = job_id
                             logger.debug(
                                 f"Scheduled silence watcher {job_id} in {config.proactive_silence_waiting_seconds}s"
                             )
@@ -712,7 +728,7 @@ async def send_reply_message(
 
         # 发送消息
         try:
-            if target.private or is_proactive:
+            if target.private or is_proactive or is_linger:
                 send_msg = await _uni_message.export()
             else:
                 send_msg = await alconna.UniMessage([alconna.At("user", user_id), "\n", _uni_message]).export()

@@ -24,6 +24,12 @@ nb plugin install nonebot-plugin-dify
 pip install nonebot-plugin-dify
 ```
 
+如果需要使用**主动介入（Proactive Mode）**功能，请安装额外依赖：
+
+```bash
+pip install "nonebot-plugin-dify[proactive]"
+```
+
 然后打开 nonebot2 项目根目录下的 `pyproject.toml` 文件, 在 `[tool.nonebot]` 部分追加写入
 
 ```toml
