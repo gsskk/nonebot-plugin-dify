@@ -16,6 +16,8 @@ class Session:
     message_counter: int = 0
     last_interaction_time: float = 0.0
     linger_message_count: int = 0
+    proactive_last_trigger_time: float = 0.0
+    proactive_pending_task_id: str = ""
 
 
 # 2. 全局的、唯一的缓存实例

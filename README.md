@@ -116,6 +116,26 @@ plugins = ["nonebot_plugin_dify"]
 | LINGER_TIMEOUT_SECONDS | 否 |           60           | 余韵模式持续时间（秒） |
 | LINGER_MAX_MESSAGES | 否 |           5           | 余韵模式下连续回复的最大消息数 |
 
+### 主动介入模式 (Proactive Intervention)
+
+开启此模式后，机器人可以在未被 @ 的情况下，根据聊天内容的主题相关性自动参与群聊。
+为了保证体验自然且不造成打扰，我们设计了三重过滤机制：语义匹配、随机概率和冷却时间。
+
+- **语义匹配**: 使用轻量级向量模型 (`BAAI/bge-small-zh-v1.5`) 分析聊天内容，只有当话题与预设的 `PROACTIVE_INTERESTS` 高度相关时才触发。
+- **冷场保护**: 即使话题相关，机器人也会默认等待一段时间（`PROACTIVE_SILENCE_WAITING_SECONDS`），确认没有其他人回复（即发生冷场）时才会介入。
+- **静默协议**: 最终决定权在 AI 手中。如果 AI 认为此时不适合插话，它会保持沉默。
+
+| 配置项 | 必填 |          默认值           | 说明 |
+|:-----:|:----:|:----------------------:|:----------------------------------------------------------------:|
+| PROACTIVE_MODE_ENABLE | 否 |         False          | 是否启用主动介入模式 |
+| PROACTIVE_MODEL_NAME | 否 | "BAAI/bge-small-zh-v1.5" | 语义匹配模型名称 |
+| PROACTIVE_HF_MIRROR | 否 | "https://hf-mirror.com" | HuggingFace镜像地址，用于国内下载模型 |
+| PROACTIVE_INTERESTS | 否 |           []           | 机器人感兴趣的话题列表 (例如 `['AI', 'Python', '动漫']`) |
+| PROACTIVE_SEMANTIC_THRESHOLD | 否 |          0.8           | 语义相似度阈值 (0.0-1.0)，越高越严格 |
+| PROACTIVE_LIKELIHOOD | 否 |          1.0           | 触发概率 (0.0-1.0)，建议设为 0.5-0.7 以增加随机感 |
+| PROACTIVE_COOLDOWN_SECONDS | 否 |          1800          | 主动介入的冷却时间 (秒)，默认30分钟 |
+| PROACTIVE_SILENCE_WAITING_SECONDS | 否 |          120           | 触发前的观察静默期 (秒)，期间若有人发言则取消介入 |
+
 ### 管理配置
 
 | 配置项 | 必填 |          默认值           | 说明 |
@@ -276,7 +296,7 @@ Your input is a single block of text containing several data tags. You must pars
 [RESPONSE_LOGIC]
 1.  **Identity:** NEVER identify as an AI, model, or bot. You are a participant. Refer to yourself as 'I'.
 2.  **Conciseness:** Get to the point. Use short, natural language. Avoid long paragraphs.
-3.  **Silence Policy:** If the conversation is irrelevant or you have nothing meaningful to add, output exactly `<IGNORE>` (or an empty string). This is critical for group chat hygiene.
+3.  **Silence Policy:** If the conversation is irrelevant, or if you are observing as a bystander and have nothing highly valuable or unique to contribute, output exactly `<IGNORE>` (or an empty string). This is critical for avoiding noise in group chats.
 4.  **Safety:** For sensitive topics (health, finance, legal), provide a brief, helpful thought, then ALWAYS add a disclaimer like: 'Just my two cents, but I'm not an expert, so it's best to check with a professional.'
 5.  **Default Behavior:** If `<personalization>` is empty, act as a generally curious and observant friend.
 6.  **Hierarchy:** Your response should directly address the `<user_query>`, guided first by `<personalization>`, then by `<user_profile>`, `<group_members>` or `<group_profile>`, and finally by `<history>`.

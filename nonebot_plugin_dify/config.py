@@ -179,6 +179,31 @@ class Config(BaseModel):
     linger_max_messages: int = 5
     """Linger模式下连续回复的最大消息数"""
 
+    # Proactive Intervention (Phase 3)
+    proactive_mode_enable: bool = False
+    """是否启用主动介入模式（基于语义分析自动回复）"""
+
+    proactive_model_name: str = "BAAI/bge-small-zh-v1.5"
+    """主动介入使用的语义嵌入模型名称"""
+
+    proactive_hf_mirror: str = "https://hf-mirror.com"
+    """HuggingFace镜像地址，用于国内下载模型"""
+
+    proactive_interests: Set[str] = {"科技", "AI", "二次元"}
+    """机器人感兴趣的话题列表，用于语义匹配"""
+
+    proactive_semantic_threshold: float = 0.8
+    """触发主动介入的语义相似度阈值（0.0-1.0）"""
+
+    proactive_likelihood: float = 0.5
+    """触发主动介入的随机概率（0.0-1.0），1.0表示满足阈值即触发"""
+
+    proactive_cooldown_seconds: int = 1800
+    """主动介入的冷却时间，单位秒（默认30分钟）"""
+
+    proactive_silence_waiting_seconds: int = 120
+    """触发主动介入前的观察静默期，单位秒"""
+
     # API Optimization
     api_max_retries: int = 3
     """API调用最大重试次数"""

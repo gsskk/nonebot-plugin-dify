@@ -34,6 +34,7 @@ class DifyBot:
         replied_image_path: str = None,
         at_user_ids: Optional[List[str]] = None,
         is_linger: bool = False,
+        is_proactive: bool = False,
     ):
         logger.info(f"[DIFY] query={query.strip()}")
         logger.debug(f"[DIFY] dify_user={full_user_id}")
@@ -51,12 +52,18 @@ class DifyBot:
                 replied_image_path=replied_image_path,
                 at_user_ids=at_user_ids,
                 is_linger=is_linger,
+                is_proactive=is_proactive,
             )
 
             if not _reply_type_list:
                 # Linger mode silent handling
                 if is_linger:
                     logger.debug("Linger mode: suppressed empty response.")
+                    return [], []
+
+                # Proactive mode silent handling
+                if is_proactive:
+                    logger.debug("Proactive mode: suppressed empty response.")
                     return [], []
 
                 logger.warning(f"Failed to process reply: {_reply_content_list}")
@@ -67,6 +74,13 @@ class DifyBot:
                 content = _reply_content_list[0].strip()
                 if not content or "<IGNORE>" in content:
                     logger.debug("Linger mode: suppressed response due to empty content or <IGNORE> token.")
+                    return [], []
+
+            # Check for <IGNORE> token if proactive
+            if is_proactive and _reply_type_list == [ReplyType.TEXT] and len(_reply_content_list) == 1:
+                content = _reply_content_list[0].strip()
+                if not content or "<IGNORE>" in content:
+                    logger.debug("Proactive mode: suppressed response due to empty content or <IGNORE> token.")
                     return [], []
 
             return _reply_type_list, _reply_content_list
@@ -85,6 +99,7 @@ class DifyBot:
         replied_image_path: str = None,
         at_user_ids: Optional[List[str]] = None,
         is_linger: bool = False,
+        is_proactive: bool = False,
     ):
         try:
             session_manager.count_user_message(session)  # 限制一个conversation中消息数
@@ -119,6 +134,7 @@ class DifyBot:
                 personalization_enabled,
                 replied_message=replied_message,
                 at_user_ids=at_user_ids,
+                is_proactive=is_proactive,
             )
 
             if dify_app_type in ("chatbot", "chatflow"):
@@ -154,6 +170,7 @@ class DifyBot:
         personalization_enabled: bool = False,
         replied_message=None,
         at_user_ids: Optional[List[str]] = None,
+        is_proactive: bool = False,
     ) -> Tuple[str, Optional[str]]:
         """构建包含画像和历史记录的最终查询字符串"""
         adapter_name = self._extract_adapter_name(full_user_id)
@@ -269,12 +286,20 @@ class DifyBot:
                 content = chat_recorder.limit_chat_history_length(history_lines, config.group_chat_history_size)
                 history_str = f"<history>\n{content}\n</history>\n"
 
+        # --- 注入主动介入提示 ---
+        proactive_hint = ""
+        if is_proactive:
+            proactive_hint = (
+                "[System Note: You are a bystander. You are responding because no one else in the group replied after a delay. "
+                "If the topic is relevant and you can add value, reply naturally without using '@'. Otherwise, output <IGNORE>.]\n"
+            )
+
         # --- 组合最终查询 ---
         current_query = f"{user_id}: {query}"
-        final_query = f"{group_members_str}{group_profile_str}{personalization_str}{history_str}{replied_message_str}<user_query>\n{current_query}\n</user_query>"
+        final_query = f"{proactive_hint}{group_members_str}{group_profile_str}{personalization_str}{history_str}{replied_message_str}<user_query>\n{current_query}\n</user_query>"
 
         logger.debug(
-            f"[DIFY] 已拼接上下文到查询 (含成员画像: {bool(group_members_str)}, 含群画像: {bool(group_profile_str)})"
+            f"[DIFY] 已拼接上下文到查询 (含成员画像: {bool(group_members_str)}, 含群画像: {bool(group_profile_str)}, 主动介入: {is_proactive})"
         )
         return final_query, conversation_id
 

@@ -17,7 +17,7 @@ from typing import List
 import importlib
 import re
 import time
-
+from datetime import datetime
 from .config import Config, config
 from . import session as session_manager
 from .dify_bot import DifyBot
@@ -412,35 +412,115 @@ async def handle_message(bot: Bot, event: Event):
                         is_mentioned = True
                         break
 
-            # --- Linger Mode Logic ---
+            # --- Priority 2: Linger Mode Check ---
             if not is_mentioned and config.linger_mode_enable:
-                # Check time since last interaction
                 time_since_last = time.time() - session.last_interaction_time
                 if time_since_last < config.linger_timeout_seconds:
-                    # Check message count limit
                     if session.linger_message_count < config.linger_max_messages:
                         logger.debug(
-                            f"Linger mode active: {time_since_last:.1f}s since last interaction, count {session.linger_message_count}"
+                            f"Linger mode active: {time_since_last:.1f}s since last, count {session.linger_message_count}"
                         )
                         is_mentioned = True
                         is_linger = True
 
-            # If triggered, update session state
+            # --- Handle Active Triggers (At or Linger) ---
             if is_mentioned:
+                # 1. Cancel any pending proactive task because the conversation is now active
+                if session.proactive_pending_task_id:
+                    try:
+                        scheduler.remove_job(session.proactive_pending_task_id)
+                        logger.debug(
+                            f"Cancelled proactive task due to active mention: {session.proactive_pending_task_id}"
+                        )
+                    except Exception:
+                        pass
+                    session.proactive_pending_task_id = ""
+
+                # 2. Update session state
                 session.last_interaction_time = time.time()
                 if is_linger:
                     session.linger_message_count += 1
                 else:
                     session.linger_message_count = 0  # Reset on explicit mention
 
-            # 记录群消息（无论是否@机器人）
-            try:
-                await record_group_message(target, event, uni_msg, bot, user_id, adapter_name, is_mentioned)
-            except Exception as e:
-                logger.warning(f"Failed to record group message: {e}")
+                # 3. Record and proceed to reply
+                try:
+                    await record_group_message(target, event, uni_msg, bot, user_id, adapter_name, is_mentioned)
+                except Exception as e:
+                    logger.warning(f"Failed to record group message: {e}")
 
-            # 如果不是@机器人的消息，直接返回
-            if not is_mentioned:
+            # --- Priority 3: Proactive Intervention Check (Only if not mentioned) ---
+            else:
+                # 1. Any incoming message breaks the silence, so cancel pending tasks
+                if session.proactive_pending_task_id:
+                    try:
+                        scheduler.remove_job(session.proactive_pending_task_id)
+                        logger.debug(
+                            f"Reset silence watcher because someone spoke: {session.proactive_pending_task_id}"
+                        )
+                    except Exception:
+                        pass
+                    session.proactive_pending_task_id = ""
+
+                # 2. Record the message (as a normal non-mention message)
+                try:
+                    await record_group_message(target, event, uni_msg, bot, user_id, adapter_name, is_mentioned)
+                except Exception as e:
+                    logger.warning(f"Failed to record group message: {e}")
+
+                # 3. Check if we should start a new proactive observation
+                if config.proactive_mode_enable:
+                    # Cooldown check (using last_interaction_time to ensure we don't jump into fresh conversations)
+                    time_since_last = time.time() - session.last_interaction_time
+                    if time_since_last > config.proactive_cooldown_seconds:
+                        from .common.semantic_matcher import semantic_matcher
+
+                        if semantic_matcher.check_relevance(msg_text):
+                            trigger_time = time.time() + config.proactive_silence_waiting_seconds
+                            job_id = f"proactive_trigger_{session.id}_{int(time.time())}"
+
+                            async def _proactive_callback(
+                                bot_ref=bot,
+                                event_ref=event,
+                                session_ref=session,
+                                uni_msg_ref=uni_msg,
+                                full_user_id_ref=full_user_id,
+                                session_id_ref=session_id,
+                                target_ref=target,
+                                adapter_name_ref=adapter_name,
+                            ):
+                                logger.info(f"Proactive intervention triggered for session {session_id_ref}")
+                                # Mark as active to enforce cooldown
+                                session_ref.last_interaction_time = time.time()
+                                session_ref.proactive_last_trigger_time = time.time()
+                                session_ref.proactive_pending_task_id = ""
+                                msg_text = uni_msg_ref.extract_plain_text()
+                                try:
+                                    await send_reply_message(
+                                        msg_text,
+                                        full_user_id_ref,
+                                        session_id_ref,
+                                        event_ref,
+                                        bot_ref,
+                                        target_ref,
+                                        adapter_name_ref,
+                                        personalization_enabled=False,
+                                        at_user_ids=[],
+                                        is_linger=False,
+                                        is_proactive=True,
+                                    )
+                                except Exception as e:
+                                    logger.error(f"Proactive reply failed: {e}")
+
+                            scheduler.add_job(
+                                _proactive_callback, "date", run_date=datetime.fromtimestamp(trigger_time), id=job_id
+                            )
+                            session.proactive_pending_task_id = job_id
+                            logger.debug(
+                                f"Scheduled silence watcher {job_id} in {config.proactive_silence_waiting_seconds}s"
+                            )
+
+                # 4. Finish processing this message (no immediate reply)
                 logger.debug("Ignored non-mention message in group.")
                 await receive_message.finish()
 
@@ -599,6 +679,7 @@ async def send_reply_message(
     replied_image_path: str = None,
     at_user_ids: list[str] = None,
     is_linger: bool = False,
+    is_proactive: bool = False,
 ) -> None:
     """发送回复消息"""
     user_id = event.get_user_id() or "user"
@@ -614,9 +695,10 @@ async def send_reply_message(
             replied_image_path=replied_image_path,
             at_user_ids=at_user_ids,
             is_linger=is_linger,
+            is_proactive=is_proactive,
         )
 
-        # 检查是否为静默回复（Linger Mode）
+        # 检查是否为静默回复（Linger Mode 或 Proactive Mode）
         if not reply_type and not reply_content:
             logger.debug("Suppressing silent reply.")
             return
@@ -630,7 +712,7 @@ async def send_reply_message(
 
         # 发送消息
         try:
-            if target.private:
+            if target.private or is_proactive:
                 send_msg = await _uni_message.export()
             else:
                 send_msg = await alconna.UniMessage([alconna.At("user", user_id), "\n", _uni_message]).export()
@@ -1004,17 +1086,26 @@ if config.private_personalization_enable and config.profiler_workflow_api_key:
         from .common.private_profiler_task import process_single_user_profile
 
         logger.info("开始派发私聊画像分析任务...")
-        users_to_process = private_chat_manager.get_all_personalization_statuses()
+        all_statuses = private_chat_manager.get_all_personalization_statuses()
+        enabled_users = []
+        for key, status in all_statuses.items():
+            if status and "+private+" in key:
+                parts = key.split("+")
+                if len(parts) == 3:  # format: adapter+private+user_id
+                    enabled_users.append((parts[0], parts[2]))
+
+        if not enabled_users:
+            logger.info("没有启用个性化功能的私聊用户，任务结束。")
+            return
+
         jitter_minutes = config.private_profiler_schedule_jitter
 
         if jitter_minutes <= 0:
             logger.info("Jitter被禁用，立即执行所有私聊分析任务...")
-            await asyncio.gather(
-                *[process_single_user_profile(adapter, user_id) for adapter, user_id in users_to_process]
-            )
+            await asyncio.gather(*[process_single_user_profile(adapter, user_id) for adapter, user_id in enabled_users])
         else:
             logger.info(f"Jitter已启用，私聊分析任务将在 {jitter_minutes} 分钟内平滑执行。")
-            for adapter, user_id in users_to_process:
+            for adapter, user_id in enabled_users:
                 delay = random.uniform(0, jitter_minutes * 60)
                 await asyncio.sleep(delay)
                 asyncio.create_task(process_single_user_profile(adapter, user_id))
@@ -1031,6 +1122,8 @@ if config.private_personalization_enable and config.profiler_workflow_api_key:
     logger.info(f"已成功安排私聊画像生成定时任务，触发器: {config.private_profiler_schedule}")
 
 if config.profiler_workflow_api_key:
+    import asyncio
+    import random
 
     async def _trigger_group_profiling_session():
         """由cron触发，负责派发具体的群组分析任务"""
