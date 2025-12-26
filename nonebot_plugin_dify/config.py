@@ -128,6 +128,9 @@ class Config(BaseModel):
     profiler_workflow_api_key: str = ""
     """用于生成群组画像的Dify工作流API Key"""
 
+    private_profiler_workflow_api_key: str = ""
+    """用于生成私聊个人画像的Dify工作流API Key，如不配置则默认使用PROFILER_WORKFLOW_API_KEY"""
+
     profiler_history_limit: int = 50
     """生成画像时分析的最近历史记录条数"""
 

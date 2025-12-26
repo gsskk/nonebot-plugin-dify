@@ -52,7 +52,8 @@ class UserMemoryManager:
 
     def _get_headers(self) -> Dict[str, str]:
         """Get headers for Dify API requests"""
-        return {"Authorization": f"Bearer {plugin_config.profiler_workflow_api_key}"}
+        api_key = plugin_config.private_profiler_workflow_api_key or plugin_config.profiler_workflow_api_key
+        return {"Authorization": f"Bearer {api_key}"}
 
     def _is_circuit_breaker_open(self) -> bool:
         """Check if circuit breaker is open (API is considered down)"""

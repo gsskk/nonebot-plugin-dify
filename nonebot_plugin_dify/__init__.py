@@ -1083,7 +1083,7 @@ if config.private_personalization_enable and config.profiler_workflow_api_key:
     async def _trigger_private_profiling_session():
         """由cron触发，负责派发具体的用户分析任务"""
         from .common import private_chat_manager
-        from .common.private_profiler_task import process_single_user_profile
+        from .common.private_profiler_task import process_user_profiles
 
         logger.info("开始派发私聊画像分析任务...")
         all_statuses = private_chat_manager.get_all_personalization_statuses()
@@ -1102,13 +1102,26 @@ if config.private_personalization_enable and config.profiler_workflow_api_key:
 
         if jitter_minutes <= 0:
             logger.info("Jitter被禁用，立即执行所有私聊分析任务...")
-            await asyncio.gather(*[process_single_user_profile(adapter, user_id) for adapter, user_id in enabled_users])
+            await process_user_profiles(enabled_users)
         else:
             logger.info(f"Jitter已启用，私聊分析任务将在 {jitter_minutes} 分钟内平滑执行。")
-            for adapter, user_id in enabled_users:
+
+            # Group users by adapter to use batch_update_users effectively
+            adapter_groups = {}
+            for adapter_name, user_id in enabled_users:
+                if adapter_name not in adapter_groups:
+                    adapter_groups[adapter_name] = []
+                adapter_groups[adapter_name].append(user_id)
+
+            async def _delayed_process(adapter, uids):
                 delay = random.uniform(0, jitter_minutes * 60)
                 await asyncio.sleep(delay)
-                asyncio.create_task(process_single_user_profile(adapter, user_id))
+                from .common.private_profiler_task import process_user_profiles
+
+                await process_user_profiles([(adapter, uid) for uid in uids])
+
+            for adapter_name, uids in adapter_groups.items():
+                asyncio.create_task(_delayed_process(adapter_name, uids))
 
     scheduler.add_job(
         _trigger_private_profiling_session,

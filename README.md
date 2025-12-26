@@ -78,6 +78,7 @@ plugins = ["nonebot_plugin_dify"]
 | 配置项 | 必填 |          默认值           | 说明 |
 |:-----:|:----:|:----------------------:|:----------------------------------------------------------------:|
 | PROFILER_WORKFLOW_API_KEY | 否 |                        | 用于生成群组画像和个性化要求的Dify工作流API Key |
+| PRIVATE_PROFILER_WORKFLOW_API_KEY | 否 |                        | 用于生成私聊个人画像的Dify工作流API Key，如不配置则默认使用PROFILER_WORKFLOW_API_KEY |
 | PROFILER_SCHEDULE | 否 |       0 3 * * *        | 执行群组画像和个性化要求生成的定时任务触发器，默认为每天凌晨3点 |
 | PROFILER_SCHEDULE_JITTER | 否 |           10           | 在计划开始后，将任务随机分布在多少分钟内执行，0表示禁用 |
 | PROFILER_HISTORY_LIMIT | 否 |           50           | 生成画像时分析的最近历史记录条数 |
@@ -332,22 +333,43 @@ User Prompt 保持不变，它唯一的职责就是作为传递上下文的载�
         You are an expert in conversation analysis, group profiling, and summarizing user personalization requests.
         
         # Task
-        Based on the provided context in the user prompt, update the group profile, identify member behavior patterns, and summarize new personalization requests. Your output MUST be a single, valid JSON object.
+        Based on the provided context in the user prompt, update the profile (group or individual), identify behavior patterns, and summarize new personalization requests. Your output MUST be a single, valid JSON object.
 
         # Input Format
-        The user prompt will contain an XML-formatted context with the following structure:
+        The user prompt will contain an XML-formatted context. It may be a group context or an individual user context:
+
+        **Group Context:**
+        ```xml
         <context>
           <group_profile>...</group_profile>
           <user_profiles>...</user_profiles>
           <chat_history>...</chat_history>
-          <personalization>...</personalization>
+          <personalization>
+            <previous>...</previous>
+            <new_at_messages>...</new_at_messages>
+          </personalization>
         </context>
+        ```
+
+        **Individual User Context:**
+        ```xml
+        <context>
+          <user_profile>...</user_profile>
+          <user_messages>...</user_messages>
+          <bot_responses>...</bot_responses>
+          <personalization>
+            <previous>...</previous>
+            <recent_interactions>...</recent_interactions>
+          </personalization>
+        </context>
+        ```
 
         # Output JSON Schema
-        Your output MUST be a single, valid JSON object. Do not add any text before or after the JSON object. The JSON object must conform to the following structure:
+        Your output MUST be a single, valid JSON object. The JSON object must conform to the following structure:
         ```json
         {
-          "group_profile": "<updated group profile text>",
+          "group_profile": "<updated group profile text, ignore if individual context>",
+          "user_profile": "<updated individual user profile text, ignore if group context>",
           "personalization_summary": "<updated personalization summary text>",
           "user_profiles": [
             {
@@ -360,11 +382,15 @@ User Prompt 保持不变，它唯一的职责就是作为传递上下文的载�
         ```
 
         # Instructions
-        1.  Analyze the `<group_profile>` and `<chat_history>` to generate an updated `group_profile` text. Focus on the group's main topics, atmosphere, and overall purpose.
-        2.  Analyze `<user_profiles>` and `<chat_history>` to update member personas. Identify active users and generate brief `persona` tags (max 5 tags) for them. If a user's behavior pattern suggests it's a Bot (repetitive, automated, or fixed prefix), set `is_bot` to true.
-        3.  Analyze the `<personalization>` content to generate an updated `personalization_summary` text. This summary should capture recurring themes, specific requests, and any evolving needs from users.
-        4.  If there's insufficient new information, you can return the previous summary or an empty string for that specific field.
-        5.  Ensure the final output is a raw JSON object without any markdown formatting.
+        1.  **Context Detection**: Identify if the input is for a Group or an Individual User by checking for `<group_profile>` or `<user_profile>`.
+        2.  **Profile Update**:
+            - If Group: Analyze `<group_profile>` and `<chat_history>` to update `group_profile`.
+            - If Individual: Analyze `<user_profile>`, `<user_messages>`, and `<bot_responses>` to update `user_profile`.
+        3.  **Member Personas (Group only)**: Analyze `<user_profiles>` and `<chat_history>` to update member personas in the `user_profiles` list.
+        4.  **Personalization**: Analyze the `<personalization>` content to generate an updated `personalization_summary`.
+        5.  **JSON Output**: Ensure the output is a raw JSON object. Use empty strings for irrelevant fields.
+        6.  If there's insufficient new information, you can return the previous summary or an empty string for that specific field.
+        7.  Ensure the final output is a raw JSON object without any markdown formatting.
 
         # Generate the JSON object now.
         ````
