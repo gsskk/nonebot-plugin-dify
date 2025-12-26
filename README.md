@@ -122,6 +122,8 @@ plugins = ["nonebot_plugin_dify"]
 | LINGER_MODE_ENABLE | 否 |         False          | 是否启用余韵模式，被艾特后一段时间内无需再艾特 |
 | LINGER_TIMEOUT_SECONDS | 否 |           60           | 余韵模式持续时间（秒） |
 | LINGER_MAX_MESSAGES | 否 |           5           | 余韵模式下连续回复的最大消息数 |
+| LINGER_RESPONSE_PROBABILITY | 否 |           0.5           | 余韵模式回复概率(0.0-1.0)，降低此值可减少回复频率 |
+| LINGER_MIN_INTERVAL_SECONDS | 否 |           10           | 余韵模式最小回复间隔(秒)，避免刷屏 |
 
 ### 主动介入模式 (Proactive Intervention)
 

@@ -17,6 +17,7 @@ from typing import List
 import importlib
 import re
 import time
+import random
 from datetime import datetime
 from .config import Config, config
 from . import session as session_manager
@@ -419,17 +420,44 @@ async def handle_message(bot: Bot, event: Event):
                         is_mentioned = True
                         break
 
+            # --- Check for mentions or replies to others ---
+            mentions_others = False
+            if uni_msg.has(alconna.At):
+                for seg in uni_msg[alconna.At]:
+                    if str(seg.target) != str(bot.self_id):
+                        mentions_others = True
+                        break
+
+            is_reply_to_others = False
+            if hasattr(event, "reply") and event.reply:
+                # Use getattr to be safe across different adapters
+                replied_sender = str(getattr(event.reply, "sender", getattr(event.reply, "user_id", "")))
+                if replied_sender and replied_sender != str(bot.self_id):
+                    is_reply_to_others = True
+
+            is_targeted_at_others = mentions_others or is_reply_to_others
+
             # --- Priority 2: Linger Mode Check (Group Wide) ---
-            if not is_mentioned and config.linger_mode_enable and group_state:
+            if not is_mentioned and not is_targeted_at_others and config.linger_mode_enable and group_state:
                 if group_state.last_interaction_time > 0:  # Only linger if we actually had a previous interaction
                     time_since_last = time.time() - group_state.last_interaction_time
                     if time_since_last < config.linger_timeout_seconds:
                         if group_state.linger_message_count < config.linger_max_messages:
-                            logger.debug(
-                                f"Linger mode active: {time_since_last:.1f}s since last, count {group_state.linger_message_count}"
-                            )
-                            is_mentioned = True
-                            is_linger = True
+                            # 1. Check Minimum Interval
+                            if time_since_last >= config.linger_min_interval_seconds:
+                                # 2. Check Probability
+                                if random.random() <= config.linger_response_probability:
+                                    logger.debug(
+                                        f"Linger mode active: {time_since_last:.1f}s since last, count {group_state.linger_message_count}"
+                                    )
+                                    is_mentioned = True
+                                    is_linger = True
+                                else:
+                                    logger.debug("Linger suppressed: probability check failed")
+                            else:
+                                logger.debug(
+                                    f"Linger suppressed: interval {time_since_last:.1f}s < {config.linger_min_interval_seconds}s"
+                                )
 
             # --- Handle Active Triggers (At or Linger) ---
             if is_mentioned:
@@ -478,7 +506,7 @@ async def handle_message(bot: Bot, event: Event):
                     logger.warning(f"Failed to record group message: {e}")
 
                 # 3. Check if we should start a new proactive observation
-                if config.proactive_mode_enable and group_state:
+                if not is_targeted_at_others and config.proactive_mode_enable and group_state:
                     # Cooldown check: Use max(last_interaction_time, created_at) to ensure
                     # a full cooldown period after bot restart or first sight of group.
                     reference_time = max(group_state.last_interaction_time, group_state.created_at)

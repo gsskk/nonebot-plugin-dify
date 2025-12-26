@@ -182,6 +182,12 @@ class Config(BaseModel):
     linger_max_messages: int = 5
     """Linger模式下连续回复的最大消息数"""
 
+    linger_response_probability: float = 0.5
+    """Linger模式回复概率(0.0-1.0)，降低此值可减少回复频率"""
+
+    linger_min_interval_seconds: int = 10
+    """Linger模式最小回复间隔(秒)，避免刷屏"""
+
     # Proactive Intervention (Phase 3)
     proactive_mode_enable: bool = False
     """是否启用主动介入模式（基于语义分析自动回复）"""
