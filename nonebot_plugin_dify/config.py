@@ -176,13 +176,13 @@ class Config(BaseModel):
     linger_mode_enable: bool = False
     """是否启用Linger模式（被提及后一段时间内无需@也能回复）"""
 
-    linger_timeout_seconds: int = 60
+    linger_timeout_seconds: int = 180
     """Linger模式持续时间，单位秒"""
 
-    linger_max_messages: int = 5
+    linger_max_messages: int = 3
     """Linger模式下连续回复的最大消息数"""
 
-    linger_response_probability: float = 0.5
+    linger_response_probability: float = 0.7
     """Linger模式回复概率(0.0-1.0)，降低此值可减少回复频率"""
 
     linger_min_interval_seconds: int = 10

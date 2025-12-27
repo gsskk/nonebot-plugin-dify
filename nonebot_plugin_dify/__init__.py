@@ -535,6 +535,7 @@ async def handle_message(bot: Bot, event: Event):
 
                                 # Mark as active to enforce cooldown
                                 gs.last_interaction_time = time.time()
+                                gs.linger_message_count = 0  # Reset to allow Linger mode after intervention
                                 gs.proactive_last_trigger_time = time.time()
                                 gs.proactive_pending_task_id = ""
 
