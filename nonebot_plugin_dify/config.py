@@ -179,7 +179,7 @@ class Config(BaseModel):
     linger_timeout_seconds: int = 180
     """Linger模式持续时间，单位秒"""
 
-    linger_max_messages: int = 3
+    linger_max_messages: int = 5
     """Linger模式下连续回复的最大消息数"""
 
     linger_response_probability: float = 0.7
@@ -201,7 +201,7 @@ class Config(BaseModel):
     proactive_interests: Set[str] = {"科技", "AI", "二次元"}
     """机器人感兴趣的话题列表，用于语义匹配"""
 
-    proactive_semantic_threshold: float = 0.8
+    proactive_semantic_threshold: float = 0.65
     """触发主动介入的语义相似度阈值（0.0-1.0）"""
 
     proactive_likelihood: float = 0.5

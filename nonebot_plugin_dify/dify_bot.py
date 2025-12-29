@@ -404,7 +404,7 @@ class DifyBot:
                 answer = rsp_data.get("answer", "")
                 if not answer:
                     logger.warning("Dify returned empty answer")
-                    return [ReplyType.TEXT], ["Dify返回为空，请检查 Dify 应用配置。"]
+                    return [], []
 
                 answer = self._clean_content(answer)
                 parsed_content = parse_markdown_text(answer)
@@ -525,7 +525,7 @@ class DifyBot:
 
                 if not reply_content:
                     logger.warning("Dify workflow returned empty response")
-                    return [ReplyType.TEXT], ["Dify-Workflow 未返回任何内容，请检查工作流配置。"]
+                    return [], []
 
                 reply_content = self._clean_content(reply_content)
                 return [ReplyType.TEXT], [reply_content]
