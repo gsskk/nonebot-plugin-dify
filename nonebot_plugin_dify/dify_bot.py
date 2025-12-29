@@ -203,7 +203,7 @@ class DifyBot:
         # --- 加载画像 ---
         group_profile_str = ""
         personalization_str = ""
-        group_members_str = ""
+        sender_persona_str = ""
 
         # Check if group personalization is enabled
         group_profiler_enabled = group_memory_manager.get_profiler_status(adapter_name, group_id)
@@ -218,24 +218,17 @@ class DifyBot:
             if group_profile:
                 group_profile_str = f"<group_profile>\n{group_profile}\n</group_profile>\n"
 
-            # 注入群成员图谱 (Group Member Graph)
+            # 注入发送者画像 (Sender Persona)
             try:
-                relevant_user_ids = {user_id}
-                if at_user_ids:
-                    relevant_user_ids.update(at_user_ids)
-
-                member_profiles = []
-                for uid in relevant_user_ids:
-                    profile = group_user_memory.get_user_profile(adapter_name, group_id, str(uid))
-                    if profile:
-                        persona_tags = ", ".join(profile.get("persona", []))
-                        is_bot_suffix = " (Bot)" if profile.get("is_bot") else ""
-                        member_profiles.append(f"- {uid}{is_bot_suffix}: {persona_tags}")
-
-                if member_profiles:
-                    group_members_str = "<group_members>\n" + "\n".join(member_profiles) + "\n</group_members>\n"
+                profile = group_user_memory.get_user_profile(adapter_name, group_id, str(user_id))
+                if profile:
+                    persona_tags = ", ".join(profile.get("persona", []))
+                    nickname = profile.get("nickname", "")
+                    name_display = f"{nickname}({user_id})" if nickname else user_id
+                    if persona_tags:
+                        sender_persona_str = f"<sender_persona>\n{name_display}: {persona_tags}\n</sender_persona>\n"
             except Exception as e:
-                logger.warning(f"Failed to build group members context: {e}")
+                logger.warning(f"Failed to build sender persona context: {e}")
 
             # Handle personalization priority: private personalization takes precedence in group chats
             if user_has_private_personalization:
@@ -296,10 +289,10 @@ class DifyBot:
 
         # --- 组合最终查询 ---
         current_query = f"{user_id}: {query}"
-        final_query = f"{proactive_hint}{group_members_str}{group_profile_str}{personalization_str}{history_str}{replied_message_str}<user_query>\n{current_query}\n</user_query>"
+        final_query = f"{proactive_hint}{group_profile_str}{sender_persona_str}{personalization_str}{history_str}{replied_message_str}<user_query>\n{current_query}\n</user_query>"
 
         logger.debug(
-            f"[DIFY] 已拼接上下文到查询 (含成员画像: {bool(group_members_str)}, 含群画像: {bool(group_profile_str)}, 主动介入: {is_proactive})"
+            f"[DIFY] 已拼接上下文到查询 (含发送者画像: {bool(sender_persona_str)}, 含群画像: {bool(group_profile_str)}, 主动介入: {is_proactive})"
         )
         return final_query, conversation_id
 
@@ -309,13 +302,13 @@ class DifyBot:
         """构建私聊个性化查询字符串"""
         try:
             # --- 加载用户画像和个性化数据 ---
-            user_profile_str = ""
+            sender_persona_str = ""
             personalization_str = ""
 
             try:
                 user_profile = user_profile_memory.get(adapter_name, user_id)
                 if user_profile:
-                    user_profile_str = f"<user_profile>\n{user_profile}\n</user_profile>\n"
+                    sender_persona_str = f"<sender_persona>\n{user_profile}\n</sender_persona>\n"
             except Exception as e:
                 logger.warning(f"Failed to load user profile: {e}")
 
@@ -352,11 +345,11 @@ class DifyBot:
             # --- 组合最终查询 ---
             current_query = f"User: {query}"
             final_query = (
-                f"{user_profile_str}{personalization_str}{history_str}<user_query>\n{current_query}\n</user_query>"
+                f"{sender_persona_str}{personalization_str}{history_str}<user_query>\n{current_query}\n</user_query>"
             )
 
             logger.debug(
-                f"[DIFY] 已拼接私聊上下文到查询 (含画像: {bool(user_profile_str or personalization_str)}, 含历史: {bool(history_str)})"
+                f"[DIFY] 已拼接私聊上下文到查询 (含画像: {bool(sender_persona_str or personalization_str)}, 含历史: {bool(history_str)})"
             )
 
             return final_query, conversation_id

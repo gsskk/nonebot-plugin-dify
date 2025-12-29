@@ -114,27 +114,37 @@ class GroupMemoryManager:
         all_chat_messages = await get_messages_since(self.adapter_name, str(group_id), start_time)
         at_bot_messages = await get_at_bot_messages_since(self.adapter_name, str(group_id), start_time, self.bot_name)
 
-        # 提取聊天记录中涉及的用户 ID 并获取其现有画像
-        involved_user_ids = {str(msg["user_id"]) for msg in all_chat_messages} | {
-            str(msg["user_id"]) for msg in at_bot_messages
-        }
+        # 提取聊天记录中涉及的用户 ID 和昵称并获取其现有画像
+        involved_users = {}
+        for msg in all_chat_messages:
+            uid = str(msg["user_id"])
+            if uid not in involved_users:
+                involved_users[uid] = msg.get("nickname", "")
+        for msg in at_bot_messages:
+            uid = str(msg["user_id"])
+            if uid not in involved_users:
+                involved_users[uid] = msg.get("nickname", "")
+
         user_profiles_xml = ""
-        if involved_user_ids:
+        if involved_users:
             profiles_list = []
-            for uid in involved_user_ids:
+            for uid, nickname in involved_users.items():
                 info = group_user_memory.get_user_profile(self.adapter_name, group_id, uid)
                 if info:
                     is_bot_str = " (Bot)" if info.get("is_bot") else ""
                     persona = ", ".join(info.get("persona", []))
-                    profiles_list.append(f"- {uid}{is_bot_str}: {persona}")
+                    name_str = f" [{nickname}]" if nickname else ""
+                    profiles_list.append(f"- {uid}{name_str}{is_bot_str}: {persona}")
             user_profiles_xml = "\n".join(profiles_list)
 
         # 将消息转换为可读的字符串格式
         chat_lines = [
-            f"[{msg['timestamp']}] {msg['nickname']}({msg['user_id']}): {msg['message']}" for msg in all_chat_messages
+            f"[{msg['timestamp']}] {msg.get('nickname', 'user')}({msg['user_id']}): {msg['message']}"
+            for msg in all_chat_messages
         ]
         at_bot_lines = [
-            f"[{msg['timestamp']}] {msg['nickname']}({msg['user_id']}): {msg['message']}" for msg in at_bot_messages
+            f"[{msg['timestamp']}] {msg.get('nickname', 'user')}({msg['user_id']}): {msg['message']}"
+            for msg in at_bot_messages
         ]
         chat_history_str = limit_chat_history_length(chat_lines, plugin_config.profiler_chat_history_size)
         at_bot_messages_str = limit_chat_history_length(at_bot_lines, plugin_config.profiler_chat_history_size)
@@ -168,6 +178,11 @@ class GroupMemoryManager:
         """更新群组画像和个性化要求"""
         logger.info(f"开始更新群组 {self.adapter_name}+{group_id} 的画像和个性化要求...")
         try:
+            # 获取过去24小时的聊天记录以提取昵称
+            start_time = datetime.now() - timedelta(hours=24)
+            all_chat_messages = await get_messages_since(self.adapter_name, str(group_id), start_time)
+            nicknames = {str(msg["user_id"]): msg.get("nickname", "") for msg in all_chat_messages}
+
             xml_input = await self._build_xml_input(group_id)
             # logger.debug(f"发送给 Dify Workflow 的输入：\n{xml_input}")
 
@@ -218,7 +233,7 @@ class GroupMemoryManager:
 
                     # Update User Profiles
                     if user_profiles:
-                        self._process_user_profiles(group_id, user_profiles)
+                        self._process_user_profiles(group_id, user_profiles, nicknames)
                     else:
                         logger.warning("Dify Workflow 未返回用户画像列表。")
 
@@ -237,7 +252,9 @@ class GroupMemoryManager:
         logger.info(f"群组 {group_id} 的画像和个性化要求更新流程结束。")
         return
 
-    def _process_user_profiles(self, group_id: str, user_profiles: List[Dict[str, Any]]):
+    def _process_user_profiles(
+        self, group_id: str, user_profiles: List[Dict[str, Any]], nicknames: Dict[str, str] = None
+    ):
         """Processes and saves user profiles extracted from Dify Workflow response."""
         if not isinstance(user_profiles, list):
             logger.warning(f"user_profiles expected list, got {type(user_profiles)}")
@@ -258,9 +275,10 @@ class GroupMemoryManager:
                     persona = []
 
                 is_bot = profile.get("is_bot", False)
+                nickname = nicknames.get(str(user_id)) if nicknames else None
 
                 group_user_memory.update_user_profile(
-                    self.adapter_name, group_id, str(user_id), persona, bool(is_bot), now_str
+                    self.adapter_name, group_id, str(user_id), persona, bool(is_bot), now_str, nickname
                 )
             except Exception as e:
                 logger.warning(f"Failed to process user profile for group {group_id}: {e}")

@@ -81,6 +81,7 @@ class GroupUserMemory:
     {
       "adapter+group_id": {
         "user_id": {
+          "nickname": "string",
           "persona": ["tag1", "tag2"],
           "is_bot": boolean,
           "last_active": "timestamp"
@@ -104,7 +105,14 @@ class GroupUserMemory:
         return group_data.get(user_id, {})
 
     def update_user_profile(
-        self, adapter_name: str, group_id: str, user_id: str, persona: List[str], is_bot: bool, last_active: str
+        self,
+        adapter_name: str,
+        group_id: str,
+        user_id: str,
+        persona: List[str],
+        is_bot: bool,
+        last_active: str,
+        nickname: str = None,
     ):
         """
         Updates and saves the profile for a specific user in a group.
@@ -115,11 +123,20 @@ class GroupUserMemory:
             self.group_user_profiles[key] = {}
 
         # Update user data
-        self.group_user_profiles[key][user_id] = {
+        user_data = {
             "persona": persona[:10],  # Limit tags to 10
             "is_bot": is_bot,
             "last_active": last_active,
         }
+        if nickname:
+            user_data["nickname"] = nickname
+        elif user_id in self.group_user_profiles[key]:
+            # Keep existing nickname if not provided
+            existing_nickname = self.group_user_profiles[key][user_id].get("nickname")
+            if existing_nickname:
+                user_data["nickname"] = existing_nickname
+
+        self.group_user_profiles[key][user_id] = user_data
 
         # Enforce 100 users limit
         group_data = self.group_user_profiles[key]

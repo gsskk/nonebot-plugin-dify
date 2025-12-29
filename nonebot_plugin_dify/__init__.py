@@ -36,7 +36,7 @@ from nonebot_plugin_apscheduler import scheduler
 
 dify_bot = DifyBot()
 
-__version__ = "0.1.9"
+__version__ = "0.1.10"
 
 __plugin_meta__ = PluginMetadata(
     name="dify插件",
