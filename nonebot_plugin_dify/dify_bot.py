@@ -16,7 +16,7 @@ from .common.reply_type import ReplyType
 from .common import chat_recorder, record_manager, group_memory_manager
 from .common.group_data_store import group_profile_memory, personalization_memory, group_user_memory
 from .cache import USER_IMAGE_CACHE
-from .common import private_chat_manager, private_chat_recorder
+from .common import private_chat_recorder
 from .common.user_data_store import user_profile_memory, user_personalization_memory
 
 
@@ -208,11 +208,6 @@ class DifyBot:
         # Check if group personalization is enabled
         group_profiler_enabled = group_memory_manager.get_profiler_status(adapter_name, group_id)
 
-        # Check if user has private personalization enabled (for priority handling)
-        user_has_private_personalization = False
-        if config.private_personalization_enable:
-            user_has_private_personalization = private_chat_manager.get_personalization_status(adapter_name, user_id)
-
         if group_profiler_enabled:
             group_profile = group_profile_memory.get(adapter_name, group_id)
             if group_profile:
@@ -230,24 +225,10 @@ class DifyBot:
             except Exception as e:
                 logger.warning(f"Failed to build sender persona context: {e}")
 
-            # Handle personalization priority: private personalization takes precedence in group chats
-            if user_has_private_personalization:
-                # Use private personalization data in group chat if available
-                private_personalization = user_personalization_memory.get(adapter_name, user_id)
-                if private_personalization:
-                    personalization_str = f"<personalization>\n{private_personalization}\n</personalization>\n"
-                    logger.debug(f"Using private personalization for user {user_id} in group {group_id}")
-                else:
-                    # Fallback to group personalization if private data is not available
-                    group_personalization = personalization_memory.get(adapter_name, group_id)
-                    if group_personalization:
-                        personalization_str = f"<personalization>\n{group_personalization}\n</personalization>\n"
-                        logger.debug(f"Fallback to group personalization for user {user_id} in group {group_id}")
-            else:
-                # Use group personalization as normal
-                group_personalization = personalization_memory.get(adapter_name, group_id)
-                if group_personalization:
-                    personalization_str = f"<personalization>\n{group_personalization}\n</personalization>\n"
+            # Use group personalization in group chats
+            group_personalization = personalization_memory.get(adapter_name, group_id)
+            if group_personalization:
+                personalization_str = f"<personalization>\n{group_personalization}\n</personalization>\n"
 
         # --- 获取历史记录 ---
         history_str = ""
