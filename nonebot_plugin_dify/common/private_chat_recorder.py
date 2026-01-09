@@ -69,7 +69,13 @@ def _clean_message_for_private_recording(message: str) -> str:
 
 
 async def record_private_message(
-    adapter_name: str, user_id: str, nickname: str, message: str, role: Literal["user", "assistant"]
+    adapter_name: str,
+    user_id: str,
+    nickname: str,
+    message: str,
+    role: Literal["user", "assistant"],
+    has_image: bool = False,
+    image_description: str = None,
 ) -> None:
     """
     Asynchronously record a single private chat message to local file.
@@ -81,6 +87,8 @@ async def record_private_message(
         nickname: The display name of the user
         message: The message content
         role: Either 'user' or 'assistant'
+        has_image: Whether the message contains an image
+        image_description: Description of the image (if generated)
     """
     try:
         # Validate input parameters
@@ -107,6 +115,12 @@ async def record_private_message(
             "nickname": nickname,
             "message": cleaned_message,
         }
+
+        # Add image metadata if present
+        if has_image:
+            log_entry["has_image"] = True
+            if image_description:
+                log_entry["image_description"] = image_description
 
         # Validate the complete log entry
         try:
@@ -394,7 +408,17 @@ def limit_private_chat_history_length(messages: List[Dict], max_length: int) -> 
         nickname = msg.get("nickname", "Unknown")
         message = msg.get("message", "")
 
-        line = f"[{timestamp}] {role.upper()} {nickname}: {message}"
+        # Build line with optional image marker
+        line = f"[{timestamp}] {role.upper()} {nickname}: "
+
+        # Handle image markers based on history_image_mode
+        if msg.get("has_image") and config.history_image_mode != "none":
+            if config.history_image_mode == "description" and msg.get("image_description"):
+                line += f"[image: {msg.get('image_description')}] "
+            else:
+                line += "[image] "
+
+        line += message
         line_length = len(line) + 1  # +1 for newline
 
         if total_length + line_length <= max_length:

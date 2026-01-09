@@ -27,11 +27,14 @@ from .common import record_manager, chat_recorder, group_memory_manager
 from .common import private_chat_manager, private_chat_recorder, data_cleanup_task
 from .common.user_data_store import user_profile_memory, user_personalization_memory
 from .common.utils import get_pic_from_url, save_pic
+from .common import image_reference_cache, image_description_client
 from .cache import USER_IMAGE_CACHE
 
 import nonebot_plugin_alconna as alconna
 import nonebot_plugin_localstore as store
 from nonebot_plugin_apscheduler import scheduler
+import asyncio
+from .common.image_utils import ImageUtils
 
 
 dify_bot = DifyBot()
@@ -52,6 +55,20 @@ __plugin_meta__ = PluginMetadata(
         "version": __version__,
     },
 )
+
+# 启动时配置检查
+if config.image_attach_mode != "off" and not config.image_upload_enable:
+    logger.warning(
+        "IMAGE_ATTACH_MODE 设置为 '%s'，但 IMAGE_UPLOAD_ENABLE 为 False。"
+        "图片缓存功能需要 IMAGE_UPLOAD_ENABLE=true 才能正常工作。",
+        config.image_attach_mode,
+    )
+
+if config.history_image_mode == "description" and not config.image_description_workflow_api_key:
+    logger.warning(
+        "HISTORY_IMAGE_MODE 设置为 'description'，但 IMAGE_DESCRIPTION_WORKFLOW_API_KEY 未配置。"
+        "图片描述生成功能将无法工作。"
+    )
 
 
 # 动态权限检查器
@@ -232,7 +249,7 @@ def clean_message_for_record(message: alconna.UniMessage) -> str:
     text_parts = []
     for seg in message:
         if isinstance(seg, alconna.Image):
-            text_parts.append("[IMG]")
+            continue  # Skip images, let has_image flag handle it
         else:
             text_parts.append(str(seg))
 
@@ -368,15 +385,40 @@ async def handle_message(bot: Bot, event: Event):
         uni_msg = alconna.UniMessage.generate_without_reply(event=event, bot=bot)
         msg_text = uni_msg.extract_plain_text()
 
-        # 忽略空消息
-        if not msg_text:
-            logger.debug("Ignored empty plaintext message.")
-            await receive_message.finish()
-
-        # 获取用户信息
+        # 获取用户信息（提前获取，因为图片缓存也需要用到）
         user_id = event.get_user_id() or "user"
         full_user_id = get_full_user_id(event, bot)
         session_id = f"s-{full_user_id}"
+
+        # 处理消息中的图片（即使没有文本也要缓存图片，供后续引用）
+        if uni_msg.has(alconna.Image):
+            try:
+                current_group_id = None if target.private else target.id
+                await handle_message_images(uni_msg, event, bot, session_id, adapter_name, current_group_id, user_id)
+            except Exception as e:
+                logger.warning(f"Failed to handle message images: {e}")
+
+        # 忽略空消息（且无图片）
+        # 注意：如果有图片，即使没有文字也应该记录历史并处理缓存
+        has_img = uni_msg.has(alconna.Image)
+        if not msg_text and not has_img:
+            # 清理 USER_IMAGE_CACHE（虽然理论上没图就没有cache，但是个好习惯）
+            if session_id in USER_IMAGE_CACHE:
+                try:
+                    cache_item = USER_IMAGE_CACHE.pop(session_id)
+                    path = cache_item.get("path")
+                    if path and os.path.exists(path):
+                        os.remove(path)
+                    logger.debug(f"Cleaned up temporary user image cache for session {session_id}")
+                except Exception as e:
+                    logger.warning(f"Failed to cleanup user image cache: {e}")
+
+            logger.debug("Ignored empty plaintext message (no image).")
+            await receive_message.finish()
+
+        # 如果有图没字，给一个空格作为文本，确保后续流程正常
+        if not msg_text and has_img:
+            msg_text = " "
 
         # Pre-fetch session to check linger state
         # session = session_manager.get_session(session_id, full_user_id)
@@ -400,8 +442,36 @@ async def handle_message(bot: Bot, event: Event):
                     if personalization_enabled:
                         nickname = await get_sender_nickname(event, user_id, bot)
                         cleaned_message = clean_message_for_record(uni_msg)
+                        # Generate image description for private chat if enabled
+                        image_description = None
+                        if uni_msg.has(alconna.Image) and config.history_image_mode == "description":
+                            try:
+                                path = None
+                                if session_id and session_id in USER_IMAGE_CACHE:
+                                    path = USER_IMAGE_CACHE[session_id].get("path")
+                                if path:
+                                    # Optimization: Check if image should be processed
+                                    action = await asyncio.to_thread(ImageUtils.analyze_image, path)
+                                    if action == "skip":
+                                        logger.debug(f"Skipping private image description for {path} (optimization)")
+                                    else:
+                                        if action == "compress":
+                                            path = await asyncio.to_thread(ImageUtils.compress_image, path)
+
+                                        image_description = await image_description_client.generate_image_description(
+                                            path, user_id
+                                        )
+                            except Exception as e:
+                                logger.warning(f"Failed to generate private image description: {e}")
+
                         await private_chat_recorder.record_private_message(
-                            adapter_name, user_id, nickname, cleaned_message, "user"
+                            adapter_name,
+                            user_id,
+                            nickname,
+                            cleaned_message,
+                            "user",
+                            has_image=uni_msg.has(alconna.Image),
+                            image_description=image_description,
                         )
                         logger.debug(f"Recorded private chat user message for {user_id}")
                 except Exception as e:
@@ -482,7 +552,17 @@ async def handle_message(bot: Bot, event: Event):
 
                 # 3. Record and proceed to reply
                 try:
-                    await record_group_message(target, event, uni_msg, bot, user_id, adapter_name, is_mentioned)
+                    await record_group_message(
+                        target,
+                        event,
+                        uni_msg,
+                        bot,
+                        user_id,
+                        adapter_name,
+                        is_mentioned,
+                        has_image=uni_msg.has(alconna.Image),
+                        session_id=session_id,
+                    )
                 except Exception as e:
                     logger.warning(f"Failed to record group message: {e}")
 
@@ -501,7 +581,17 @@ async def handle_message(bot: Bot, event: Event):
 
                 # 2. Record the message (as a normal non-mention message)
                 try:
-                    await record_group_message(target, event, uni_msg, bot, user_id, adapter_name, is_mentioned)
+                    await record_group_message(
+                        target,
+                        event,
+                        uni_msg,
+                        bot,
+                        user_id,
+                        adapter_name,
+                        is_mentioned,
+                        has_image=uni_msg.has(alconna.Image),
+                        session_id=session_id,
+                    )
                 except Exception as e:
                     logger.warning(f"Failed to record group message: {e}")
 
@@ -566,16 +656,23 @@ async def handle_message(bot: Bot, event: Event):
                             )
 
                 # 4. Finish processing this message (no immediate reply)
+                # Cleanup cache since we are not replying
+                if session_id in USER_IMAGE_CACHE:
+                    try:
+                        cache_item = USER_IMAGE_CACHE.pop(session_id)
+                        path = cache_item.get("path")
+                        if path and os.path.exists(path):
+                            os.remove(path)
+                        logger.debug(f"Cleaned up temporary user image cache for session {session_id}")
+                    except Exception as e:
+                        logger.warning(f"Failed to cleanup user image cache: {e}")
+
                 logger.debug("Ignored non-mention message in group.")
                 await receive_message.finish()
 
             personalization_enabled = False  # Group personalization is handled separately
 
-        # 处理消息中的图片
-        try:
-            await handle_message_images(uni_msg, event, bot, session_id, adapter_name)
-        except Exception as e:
-            logger.warning(f"Failed to handle message images: {e}")
+        # 注意：图片处理已在消息处理开始时完成（第 386-391 行）
 
         # 提取被提到（At）的用户 ID
         at_user_ids = []
@@ -620,10 +717,37 @@ async def record_group_message(
     user_id: str,
     adapter_name: str,
     is_mentioned: bool,
+    has_image: bool = False,
+    session_id: str = None,
 ) -> None:
     """记录群聊消息"""
     if not record_manager.get_record_status(adapter_name, target.id):
         return
+
+    # Generate image description if enabled
+    image_description = None
+    if has_image and config.history_image_mode == "description":
+        try:
+            # Try to get image path from cache
+            path = None
+            if session_id and session_id in USER_IMAGE_CACHE:
+                path = USER_IMAGE_CACHE[session_id].get("path")
+
+            if path:
+                # Optimization: Check if image should be processed
+                action = await asyncio.to_thread(ImageUtils.analyze_image, path)
+                if action == "skip":
+                    logger.debug(f"Skipping group image description for {path} (optimization)")
+                else:
+                    if action == "compress":
+                        path = await asyncio.to_thread(ImageUtils.compress_image, path)
+
+                    logger.debug(f"Generating description for image {path}")
+                    image_description = await image_description_client.generate_image_description(path, user_id)
+            else:
+                logger.warning("Cannot generate description: Image path not found in cache")
+        except Exception as e:
+            logger.warning(f"Failed to generate image description: {e}")
 
     nickname = await get_sender_nickname(event, user_id, bot)
     a = event.model_dump()
@@ -632,7 +756,15 @@ async def record_group_message(
     cleaned_message = clean_message_for_record(uni_msg)
     logger.debug(f"记录群消息: {cleaned_message}")
     await chat_recorder.record_message(
-        adapter_name, target.id, user_id, nickname, cleaned_message, "user", is_mentioned
+        adapter_name,
+        target.id,
+        user_id,
+        nickname,
+        cleaned_message,
+        "user",
+        is_mentioned,
+        has_image=has_image,
+        image_description=image_description,
     )
 
 
@@ -686,19 +818,30 @@ async def get_adapter_name(target: alconna.Target) -> str:
 
 
 async def handle_message_images(
-    uni_msg: alconna.UniMessage, event: Event, bot: Bot, session_id: str, adapter_name: str
-) -> None:
-    """处理消息中的图片"""
+    uni_msg: alconna.UniMessage,
+    event: Event,
+    bot: Bot,
+    session_id: str,
+    adapter_name: str,
+    group_id: str = None,
+    user_id: str = None,
+) -> str:
+    """
+    处理消息中的图片
+
+    Returns:
+        图片保存路径，如果没有图片则返回 None
+    """
     if not uni_msg.has(alconna.Image):
-        return
+        return None
 
     imgs = uni_msg[alconna.Image]
     _img = imgs[0]
-    _img_bytes = await alconna.image_fetch(event=event, bot=bot, state=T_State, img=_img)
+    _img_bytes = await alconna.image_fetch(event=event, bot=bot, state=T_State(), img=_img)
 
     if not _img_bytes:
         logger.warning(f"Failed to fetch image from {adapter_name}.")
-        return
+        return None
 
     logger.debug(f"Got image {_img.id} from {adapter_name}.")
 
@@ -709,6 +852,14 @@ async def handle_message_images(
 
     USER_IMAGE_CACHE[session_id] = {"id": _img.id, "path": _img_path}
     logger.debug(f"Set image cache: {USER_IMAGE_CACHE[session_id]}, local path: {_img_path}.")
+
+    # 缓存图片到 image_reference_cache（用于后续引用分析）
+    # 只有当 image_attach_mode != "off" 时才缓存
+    if config.image_attach_mode != "off" and user_id:
+        image_reference_cache.cache_image(adapter_name, group_id, user_id, _img_path)
+        logger.debug(f"Cached image for reference: {_img_path}")
+
+    return _img_path
 
 
 async def send_reply_message(
@@ -771,7 +922,11 @@ async def send_reply_message(
                 if personalization_enabled:
                     cleaned_reply = clean_message_for_record(_uni_message)
                     await private_chat_recorder.record_private_message(
-                        adapter_name, user_id, "Bot", cleaned_reply, "assistant"
+                        adapter_name,
+                        user_id,
+                        "Bot",
+                        cleaned_reply,
+                        "assistant",
                     )
                     logger.debug(f"Recorded private chat bot response for {user_id}")
             else:
@@ -1252,3 +1407,14 @@ if config.private_personalization_enable:
         replace_existing=True,
     )
     logger.info("已成功安排数据完整性检查定时任务，每周日凌晨1点执行")
+
+# Add image cache cleanup task if image caching is enabled
+if config.image_attach_mode != "off":
+    scheduler.add_job(
+        image_reference_cache.clear_expired_cache,
+        trigger="interval",
+        hours=1,
+        id="dify_image_cache_cleanup_job",
+        replace_existing=True,
+    )
+    logger.info("已成功安排图片缓存清理定时任务，每小时执行一次")

@@ -30,16 +30,16 @@ class SemanticMatcher:
             return
 
         try:
-            logger.info("Loading proactive semantic model...")
+            logger.info("Loading proactive semantic model (FastEmbed)...")
 
             # Set HF mirror if configured
             if config.proactive_hf_mirror:
                 os.environ["HF_ENDPOINT"] = config.proactive_hf_mirror
                 logger.debug(f"Set HF_ENDPOINT to {config.proactive_hf_mirror}")
 
-            from sentence_transformers import SentenceTransformer
+            from fastembed import TextEmbedding
 
-            self._model = SentenceTransformer(config.proactive_model_name)
+            self._model = TextEmbedding(model_name=config.proactive_model_name)
             logger.info(f"Successfully loaded model: {config.proactive_model_name}")
 
         except Exception as e:
@@ -57,16 +57,18 @@ class SemanticMatcher:
             self._load_model()
 
             # Encode text and interests
-            text_embedding = self._model.encode(text, convert_to_tensor=True)
-            interest_embeddings = self._model.encode(list(interests), convert_to_tensor=True)
+            # fastembed returns generators, so we listify them
+            # normalize_embeddings=True by default for TextEmbedding, making dot product == cosine similarity
+            text_embeddings = list(self._model.embed([text]))[0]  # Get first (and only) embedding
+            interest_embeddings = list(self._model.embed(list(interests)))
 
-            from sentence_transformers import util
+            import numpy as np
 
-            # Calculate cosine similarities
-            cosine_scores = util.cos_sim(text_embedding, interest_embeddings)[0]
+            # Calculate cosine similarities (dot product since normalized)
+            scores = [np.dot(text_embeddings, interest_emb) for interest_emb in interest_embeddings]
 
             # Get maximum similarity
-            max_score = float(cosine_scores.max())
+            max_score = float(max(scores)) if scores else 0.0
             logger.debug(f"Semantic similarity score: {max_score:.4f} (Text: {text[:20]}...)")
 
             return max_score

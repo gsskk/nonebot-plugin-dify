@@ -18,6 +18,7 @@ from .common.group_data_store import group_profile_memory, personalization_memor
 from .cache import USER_IMAGE_CACHE
 from .common import private_chat_recorder
 from .common.user_data_store import user_profile_memory, user_personalization_memory
+from .common import image_reference_cache
 
 
 class DifyBot:
@@ -126,6 +127,27 @@ class DifyBot:
                     # 清理临时文件
                     if os.path.exists(replied_image_path):
                         os.remove(replied_image_path)
+
+            # 3. 处理图片引用缓存（检测用户是否引用历史图片）
+            adapter_name = self._extract_adapter_name(full_user_id)
+            group_id = self._extract_group_id(full_user_id)
+            user_id = self._extract_user_id(full_user_id)
+
+            # 只有当 IMAGE_UPLOAD_ENABLE=true 且 IMAGE_ATTACH_MODE != off 时才附加缓存图片
+            if (
+                config.image_upload_enable
+                and config.image_attach_mode != "off"
+                and image_reference_cache.should_attach_image(query)
+            ):
+                cached_image_path = image_reference_cache.get_cached_image(adapter_name, group_id, user_id)
+                if cached_image_path:
+                    try:
+                        cached_files = await self._upload_file_from_path(cached_image_path, session.user)
+                        if cached_files:
+                            all_files.extend(cached_files)
+                            logger.debug(f"Attached cached image to request: {cached_image_path}")
+                    except Exception as e:
+                        logger.warning(f"Failed to upload cached image: {e}")
 
             final_query, conversation_id = await self._build_final_query(
                 query,
@@ -253,10 +275,17 @@ class DifyBot:
                         filtered_messages.pop(i)  # 删除倒数第一个匹配的消息
                         break
 
-                history_lines = [
-                    f"{m.get('nickname', 'user')}({m.get('user_id')}): {m.get('message', '')}"
-                    for m in filtered_messages
-                ]
+                history_lines = []
+                for m in filtered_messages:
+                    line = f"{m.get('nickname', 'user')}({m.get('user_id')}): "
+                    # Handle image markers based on history_image_mode
+                    if m.get("has_image") and config.history_image_mode != "none":
+                        if config.history_image_mode == "description" and m.get("image_description"):
+                            line += f"[image: {m.get('image_description')}] "
+                        else:
+                            line += "[image] "
+                    line += m.get("message", "")
+                    history_lines.append(line)
                 content = chat_recorder.limit_chat_history_length(history_lines, config.group_chat_history_size)
                 history_str = f"<history>\n{content}\n</history>\n"
 

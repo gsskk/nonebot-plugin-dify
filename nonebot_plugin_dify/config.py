@@ -117,6 +117,41 @@ class Config(BaseModel):
     image_cache_dir: str = "image"
     """图像缓存的子目录"""
 
+    # Image History Context
+    history_image_mode: str = "placeholder"
+    """历史记录中图片的处理模式:
+    - placeholder: 标记 [image] 占位符（默认）
+    - description: 生成并存储图片描述（需配置 image_description_workflow_api_key）
+    - none: 完全不处理历史图片
+    """
+
+    image_description_workflow_api_key: str = ""
+    """用于生成图片描述的 Dify Workflow API Key，仅当 history_image_mode="description" 时使用"""
+
+    image_reference_cache_ttl: int = 1800
+    """图片引用缓存过期时间（秒），默认30分钟"""
+
+    image_attach_mode: str = "off"
+    """触发附加缓存图片的方式（非 off 时自动启用图片缓存）:
+    - off: 不缓存图片，不自动附加（默认）
+    - keyword: 缓存图片，关键词匹配时附加
+    - semantic: 缓存图片，语义匹配时附加（不可用时自动回退到 keyword）
+    - always: 缓存图片，只要有缓存就附加
+    """
+
+    # === Image Optimization ===
+    image_min_size: int = 50 * 1024
+    """最小图片大小（字节），小于此值的图片（如表情包）将被忽略。默认 50KB"""
+
+    image_max_size: int = 1 * 1024 * 1024
+    """最大图片大小（字节），大于此值的图片将被压缩。默认 1MB"""
+
+    image_compress_quality: int = 80
+    """图片压缩质量（1-100）。默认 80"""
+
+    image_compress_max_resolution: int = 1500
+    """压缩后的最大长边分辨率（像素）。默认 1500"""
+
     # Group Chat Settings
     group_chat_history_limit: int = 10
     """个性化回复时在群聊中获取最近消息记录的条数"""

@@ -17,7 +17,7 @@ nb plugin install nonebot-plugin-dify
 如果需要使用**主动介入（Proactive Mode）**功能，请安装额外依赖：
 
 ```bash
-pip install "nonebot-plugin-dify[proactive]"
+pip install "nonebot-plugin-dify[semantic]"
 ```
 
 ### 使用包管理器安装
@@ -33,7 +33,7 @@ pip install nonebot-plugin-dify
 如果需要使用**主动介入（Proactive Mode）**功能，请安装额外依赖：
 
 ```bash
-pip install "nonebot-plugin-dify[proactive]"
+pip install "nonebot-plugin-dify[semantic]"
 ```
 
 然后打开 nonebot2 项目根目录下的 `pyproject.toml` 文件, 在 `[tool.nonebot]` 部分追加写入
@@ -77,6 +77,80 @@ plugins = ["nonebot_plugin_dify"]
 |:-----:|:----:|:----------------------:|:----------------------------------------------------------------:|
 | IMAGE_UPLOAD_ENABLE | 否 |         False          | 是否开启上传图片，需要LLM模型支持图片识别，<br />同时需要nonebot_plugin_alconna支持相应Adapter |
 | IMAGE_CACHE_DIR | 否 |         "image"        | 图像缓存的子目录 |
+
+### 图片历史上下文
+
+当用户在聊天中发送过图片后，可能会在后续消息中引用该图片（如"这张图是什么"、"帮我分析一下"）。此功能增强了图片在聊天历史中的处理方式，并支持智能检测用户的图片引用意图。
+
+| 配置项 | 必填 |          默认值           | 说明 |
+|:-----:|:----:|:----------------------:|:----------------------------------------------------------------:|
+| HISTORY_IMAGE_MODE | 否 |         "placeholder"         | 历史记录中图片的处理模式：<br />`placeholder`=标记[image]（默认），`description`=生成描述（**❗每张图都会调用工作流，消耗大量 Token**），`none`=不处理 |
+| IMAGE_DESCRIPTION_WORKFLOW_API_KEY | 否 |                        | 用于生成图片描述的 Dify Workflow API Key（仅 `description` 模式需要） |
+| IMAGE_REFERENCE_CACHE_TTL | 否 |          1800          | 图片引用缓存过期时间（秒），默认30分钟 |
+| IMAGE_ATTACH_MODE | 否 |       "off"        | 触发附加缓存图片的方式（非 off 时自动启用图片缓存）：<br />`off`=不缓存（默认），`keyword`=关键词匹配，`semantic`=语义匹配，`always`=总是附加 |
+| IMAGE_MIN_SIZE | 否 |       51200         | 最小图片大小（字节），小于此值的图片（如表情包）将被忽略（默认 50KB） |
+| IMAGE_MAX_SIZE | 否 |      1048576       | 最大图片大小（字节），大于此值的图片将被压缩（默认 1MB） |
+| IMAGE_COMPRESS_QUALITY | 否 |         80         | 图片压缩质量（1-100）（默认 80） |
+| IMAGE_COMPRESS_MAX_RESOLUTION | 否 |        1500        | 压缩后的最大长边分辨率（像素）（默认 1500） |
+
+**使用方法**:
+1. 设置触发模式：`IMAGE_ATTACH_MODE=keyword`（自动启用图片缓存）
+2. 可选：设置历史图片模式：`HISTORY_IMAGE_MODE=placeholder`（或 `description`）
+
+**触发关键词示例**（`keyword` 模式自动检测）：
+- 中文：这张图、帮我看、分析图、照片、截图、识别
+- 英文：this image、analyze this、look at this
+
+> **语义模式回退**: 当 `IMAGE_ATTACH_MODE=semantic` 但语义模型不可用时，会自动回退到 `keyword` 模式。
+>
+> **注意**: `HISTORY_IMAGE_MODE="description"` 依赖于聊天记录功能。请确保在通过 `/record on` 开启了群组记录功能，否则图片无法被分析。
+
+<details>
+<summary>点击查看图片描述工作流配置示例</summary>
+
+如果使用 `HISTORY_IMAGE_MODE=description`，需要配置一个专门的 Dify Workflow 来生成图片描述。
+
+**操作步骤**:
+
+1. **创建工作流**:
+   - 在 Dify 中创建一个新的 **工作流 (Workflow)** 应用。
+   - **开始节点**: 添加一个 `File` 类型的输入变量（用于接收图片）。
+
+2. **配置 LLM 节点**:
+   - 添加一个支持视觉的 LLM 节点（如 GPT-4V、Claude 3 等）。
+   - 将图片文件连接到 LLM 的图片输入。
+   - 使用以下系统提示词：
+
+   ```text
+   # 角色
+   你是一个专业的图像分析助手，擅长提取图片中的关键信息。
+   
+   # 任务
+   分析用户提供的图片，提取以下信息并生成简洁的描述：
+   
+   1. **主要文本**: 图片中出现的任何文字内容
+   2. **场景描述**: 图片的整体场景和环境
+   3. **人物**: 图片中的人物（如有），包括数量、动作、表情
+   4. **物体**: 图片中的主要物体和元素
+   
+   # 输出格式
+   用一段话概括图片内容，控制在100字以内。格式示例：
+   "室内办公场景，3人围桌讨论，桌上有笔记本电脑和文件，墙上挂有'项目进度'图表"
+   
+   # 注意事项
+   - 优先提取对理解图片最重要的信息
+   - 如果图片模糊或无法识别，说明"图片不清晰"
+   - 不要编造图片中不存在的内容
+   ```
+
+3. **结束节点**:
+   - 将 LLM 输出连接到结束节点，确保输出变量名为 `text`。
+
+4. **获取凭据**:
+   - 发布工作流并获取 API 密钥。
+   - 将密钥填入 `.env` 的 `IMAGE_DESCRIPTION_WORKFLOW_API_KEY`。
+
+</details>
 
 ### 群聊设置
 

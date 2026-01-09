@@ -34,11 +34,17 @@ async def record_message(
     message: str,
     role: Literal["user", "assistant"],
     is_mentioned: bool,
+    has_image: bool = False,
+    image_description: str = None,
 ):
     """
     异步地将单条聊天消息记录到本地文件。
     会检测并标记复读消息。
     日志文件会每日轮转。
+
+    Args:
+        has_image: 是否包含图片
+        image_description: 图片描述（如果已生成）
     """
     now = datetime.now()
 
@@ -55,6 +61,13 @@ async def record_message(
         "is_mentioned": is_mentioned,
         "is_repeat": is_repeat,  # 增加复读标记
     }
+
+    # Add image metadata if present
+    if has_image:
+        log_entry["has_image"] = True
+        if image_description:
+            log_entry["image_description"] = image_description
+
     file_path = _get_log_file_path(adapter_name, group_id, now)
 
     async with _file_lock:
