@@ -219,9 +219,6 @@ def should_attach_image(query: str, mode: Optional[str] = None) -> bool:
     if mode == "off":
         return False
 
-    if mode == "always":
-        return True
-
     if mode == "keyword":
         return _keyword_match(query)
 

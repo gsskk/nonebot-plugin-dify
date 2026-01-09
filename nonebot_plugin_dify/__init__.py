@@ -39,7 +39,7 @@ from .common.image_utils import ImageUtils
 
 dify_bot = DifyBot()
 
-__version__ = "0.1.10"
+__version__ = "0.1.11"
 
 __plugin_meta__ = PluginMetadata(
     name="dify插件",

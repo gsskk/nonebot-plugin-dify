@@ -87,7 +87,7 @@ plugins = ["nonebot_plugin_dify"]
 | HISTORY_IMAGE_MODE | 否 |         "placeholder"         | 历史记录中图片的处理模式：<br />`placeholder`=标记[image]（默认），`description`=生成描述（**❗每张图都会调用工作流，消耗大量 Token**），`none`=不处理 |
 | IMAGE_DESCRIPTION_WORKFLOW_API_KEY | 否 |                        | 用于生成图片描述的 Dify Workflow API Key（仅 `description` 模式需要） |
 | IMAGE_REFERENCE_CACHE_TTL | 否 |          1800          | 图片引用缓存过期时间（秒），默认30分钟 |
-| IMAGE_ATTACH_MODE | 否 |       "off"        | 触发附加缓存图片的方式（非 off 时自动启用图片缓存）：<br />`off`=不缓存（默认），`keyword`=关键词匹配，`semantic`=语义匹配，`always`=总是附加 |
+| IMAGE_ATTACH_MODE | 否 |       "off"        | 触发附加缓存图片的方式（非 off 时自动启用图片缓存）：<br />`off`=不缓存（默认），`keyword`=关键词匹配，`semantic`=语义匹配 |
 | IMAGE_MIN_SIZE | 否 |       51200         | 最小图片大小（字节），小于此值的图片（如表情包）将被忽略（默认 50KB） |
 | IMAGE_MAX_SIZE | 否 |      1048576       | 最大图片大小（字节），大于此值的图片将被压缩（默认 1MB） |
 | IMAGE_COMPRESS_QUALITY | 否 |         80         | 图片压缩质量（1-100）（默认 80） |
@@ -122,33 +122,33 @@ plugins = ["nonebot_plugin_dify"]
    - 使用以下系统提示词：
 
    ```text
-   # 角色
-   你是一个专业的图像分析助手，擅长提取图片中的关键信息。
-   
-   # 任务
-   分析用户提供的图片，提取以下信息并生成简洁的描述：
-   
-   1. **主要文本**: 图片中出现的任何文字内容
-   2. **场景描述**: 图片的整体场景和环境
-   3. **人物**: 图片中的人物（如有），包括数量、动作、表情
-   4. **物体**: 图片中的主要物体和元素
-   
-   # 输出格式
-   用一段话概括图片内容，控制在100字以内。格式示例：
-   "室内办公场景，3人围桌讨论，桌上有笔记本电脑和文件，墙上挂有'项目进度'图表"
-   
-   # 注意事项
-   - 优先提取对理解图片最重要的信息
-   - 如果图片模糊或无法识别，说明"图片不清晰"
-   - 不要编造图片中不存在的内容
+   # Role
+   You are a professional image analysis assistant, skilled at extracting key information from images.
+
+   # Task
+   Analyze the provided image and extract the following information to generate a concise description:
+
+   1. **Main Text**: Any text content appearing in the image
+   2. **Scene Description**: The overall scene and environment
+   3. **Characters**: People in the image (if any), including count, actions, expressions
+   4. **Objects**: Main objects and elements in the image
+
+   # Output Format
+   Summarize the image content in a single paragraph, within 100 words. Example format:
+   "Indoor office scene, 3 people discussing around a table, with laptops and documents on the table, and a 'Project Progress' chart on the wall."
+
+   # Notes
+   - Prioritize information most important for understanding the image
+   - If the image is blurry or unrecognizable, state "Image is unclear"
+   - Do not fabricate content not present in the image
    ```
 
 3. **结束节点**:
-   - 将 LLM 输出连接到结束节点，确保输出变量名为 `text`。
+   - 将 LLM 节点的输出文本作为返回值。
 
-4. **获取凭据**:
-   - 发布工作流并获取 API 密钥。
-   - 将密钥填入 `.env` 的 `IMAGE_DESCRIPTION_WORKFLOW_API_KEY`。
+4. **发布**:
+   - 发布工作流并复制 API Key。
+   - 填入 `.env` 文件的 `IMAGE_DESCRIPTION_WORKFLOW_API_KEY` 中。
 
 </details>
 

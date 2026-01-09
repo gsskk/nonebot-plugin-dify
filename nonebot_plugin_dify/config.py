@@ -136,7 +136,6 @@ class Config(BaseModel):
     - off: 不缓存图片，不自动附加（默认）
     - keyword: 缓存图片，关键词匹配时附加
     - semantic: 缓存图片，语义匹配时附加（不可用时自动回退到 keyword）
-    - always: 缓存图片，只要有缓存就附加
     """
 
     # === Image Optimization ===
