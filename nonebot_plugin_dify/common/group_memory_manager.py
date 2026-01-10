@@ -199,7 +199,7 @@ class GroupMemoryManager:
                     f"{plugin_config.dify_api_base}/workflows/run",
                     headers=self._get_headers(),
                     json=payload,
-                    timeout=plugin_config.dify_timeout_in_seconds,
+                    timeout=plugin_config.dify_api_timeout,
                 )
 
             if response.status_code != 200:

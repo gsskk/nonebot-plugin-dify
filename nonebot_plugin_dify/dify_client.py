@@ -15,12 +15,12 @@ class DifyClient:
         async with httpx.AsyncClient() as client:
             if stream:
                 async with client.stream(
-                    method, url, json=json, params=params, headers=headers, timeout=config.dify_timeout_in_seconds
+                    method, url, json=json, params=params, headers=headers, timeout=config.dify_api_timeout
                 ) as response:
                     return response
             else:
                 response = await client.request(
-                    method, url, json=json, params=params, headers=headers, timeout=config.dify_timeout_in_seconds
+                    method, url, json=json, params=params, headers=headers, timeout=config.dify_api_timeout
                 )
                 return response
 
@@ -30,7 +30,7 @@ class DifyClient:
         url = f"{self.base_url}{endpoint}"
         async with httpx.AsyncClient() as client:
             response = await client.request(
-                method, url, data=data, headers=headers, files=files, timeout=config.dify_timeout_in_seconds
+                method, url, data=data, headers=headers, files=files, timeout=config.dify_api_timeout
             )
 
         return response

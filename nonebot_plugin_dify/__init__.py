@@ -1,19 +1,22 @@
 from nonebot import require, on_command, on_message, logger
-from nonebot.exception import FinishedException
+from nonebot.exception import FinishedException, MockApiException
 from nonebot.plugin import PluginMetadata, inherit_supported_adapters
+from nonebot.matcher import current_matcher, current_event
+from nonebot.adapters import Bot, Event
 
 require("nonebot_plugin_alconna")
 require("nonebot_plugin_localstore")
 require("nonebot_plugin_apscheduler")
 
-from nonebot.adapters import Bot, Event
+from nonebot import require, get_driver
 from nonebot.internal.matcher.matcher import Matcher
 from nonebot.rule import Rule, to_me
 from nonebot.typing import T_State
+
 import os
 from nonebot.permission import SUPERUSER, Permission
 
-from typing import List
+from typing import List, Dict, Any
 import importlib
 import re
 import time
@@ -348,9 +351,393 @@ get_my_id_command = on_command(
 )
 
 
+@Bot.on_calling_api
+async def handle_perception(bot: Bot, api: str, data: Dict[str, Any]):
+    """处理跨插件感知和拦截"""
+    if not config.perception_enabled:
+        return
+
+    # 0. 排除 Dify 自身的内部调用 (防止自我拦截导致的死循环)
+    if data.get("_dify_internal"):
+        return
+
+    # 1. 识别来源插件
+    try:
+        matcher = current_matcher.get()
+        plugin_name = matcher.plugin_name
+    except LookupError:
+        return
+
+    # 2. 排除自身
+    if plugin_name == "nonebot_plugin_dify":
+        return
+
+    # 3. 过滤名单
+    # 增加调试日志以确认配置项内容
+    logger.debug(
+        f"Perception Config: passive={config.perception_passive_plugins}, intercept={config.perception_intercept_plugins}"
+    )
+
+    is_intercept = plugin_name in config.perception_intercept_plugins
+    # 如果在拦截名单里，就不再属于被动观察名单
+    is_observe = not is_intercept and (
+        plugin_name in config.perception_passive_plugins or not config.perception_passive_plugins
+    )
+
+    if not (is_intercept or is_observe):
+        return
+
+    # 4. 提取内容
+    # 兼容不同适配器的消息字段名 (增加 Telegram 常用字段)
+    message_content = (
+        data.get("message") or data.get("msg") or data.get("content") or data.get("text") or data.get("caption")
+    )
+    if not message_content:
+        return
+
+    logger.debug(
+        f"Perception caught message from {plugin_name}: type={type(message_content)}, content={str(message_content)[:200]}..."
+    )
+
+    # 5. 解析消息内容
+    msg_text = ""
+    has_image = False
+    perceived_img_bytes = None
+
+    # 尝试多种手段提取内容，特别是处理超长 Base64 图片
+    try:
+        # 1. 尝试从原始数据中直接通过正则或特征寻找 Base64 图片
+        raw_str = str(message_content)
+        if "base64://" in raw_str or "data:image" in raw_str:
+            import base64
+            import re
+
+            # 匹配 base64:// 或 data:image/...;base64, 之后的内容
+            b64_match = re.search(r"(?:base64://|base64,)([\w+/=\s]+)", raw_str)
+            if b64_match:
+                try:
+                    perceived_img_bytes = base64.b64decode(b64_match.group(1).strip())
+                    has_image = True
+                    logger.debug(f"Perception extracted {len(perceived_img_bytes)} bytes from Base64 string.")
+                except Exception as e:
+                    logger.debug(f"Perception failed to decode Base64: {e}")
+
+        # 2. 调用 UniMessage 进行结构化解析
+        try:
+            uni_msg = alconna.UniMessage(message_content)
+            if not uni_msg.has(alconna.Image) and not uni_msg.extract_plain_text().strip():
+                uni_msg = await alconna.UniMessage.generate(message=message_content, bot=bot)
+        except Exception:
+            uni_msg = await alconna.UniMessage.generate(message=message_content, bot=bot)
+
+        msg_text = uni_msg.extract_plain_text().strip()
+        if not has_image:
+            has_image = uni_msg.has(alconna.Image)
+            if has_image:
+                logger.debug("Perception found image via UniMessage parsing.")
+    except Exception as e:
+        logger.debug(f"Perception parsing error from {plugin_name}: {e}")
+        if not has_image:
+            return
+
+    # 5. 解析消息内容
+    msg_text = ""
+    has_image = False
+    perceived_img_bytes = None
+
+    # 尝试多种手段提取内容，特别是处理超长 Base64 图片
+    try:
+        # 1. 尝试从原始数据中直接通过正则或特征寻找 Base64 图片
+        # 很多插件会发送 {"type": "image", "data": {"file": "base64://..."}} 或类似的字符串
+        raw_str = str(message_content)
+        if "base64://" in raw_str or "data:image" in raw_str:
+            import base64
+            import re
+
+            # 匹配 base64:// 或 data:image/...;base64, 之后的内容
+            b64_match = re.search(r"(?:base64://|base64,)([\w+/=\s]+)", raw_str)
+            if b64_match:
+                try:
+                    perceived_img_bytes = base64.b64decode(b64_match.group(1).strip())
+                    has_image = True
+                    logger.debug("Successfully extracted image bytes from Base64 string.")
+                except Exception:
+                    pass
+
+        # 2. 调用 UniMessage 进行结构化解析（提取文字和其他图片）
+        try:
+            uni_msg = alconna.UniMessage(message_content)
+            if not uni_msg.has(alconna.Image) and not uni_msg.extract_plain_text().strip():
+                uni_msg = await alconna.UniMessage.generate(message=message_content, bot=bot)
+        except Exception:
+            uni_msg = await alconna.UniMessage.generate(message=message_content, bot=bot)
+
+        msg_text = uni_msg.extract_plain_text().strip()
+        if not has_image:
+            has_image = uni_msg.has(alconna.Image)
+    except Exception as e:
+        logger.debug(f"Perception failed to parse message from {plugin_name}: {e}")
+        # 如果彻底解析失败但我们已经拿到了图片，依然继续
+        if not has_image:
+            return
+
+    if not msg_text and not has_image:
+        return
+
+    # 6. 获取目标
+    try:
+        # 优先从全局上下文获取 Event
+        try:
+            event = current_event.get()
+        except LookupError:
+            event = getattr(matcher, "event", None)
+
+        target = alconna.get_target()
+        adapter_name = await get_adapter_name(target)
+    except Exception:
+        return
+
+    # 6.5 提取原用户消息内容并检查是否需要排除 (命令)
+    user_msg_text = ""
+    user_has_image = False
+    if event:
+        try:
+            if hasattr(event, "get_plain_text"):
+                user_msg_text = event.get_plain_text()
+            elif hasattr(event, "get_plaintext"):
+                user_msg_text = event.get_plaintext()
+
+            if hasattr(event, "message"):
+                _user_uni = await alconna.UniMessage.generate(message=event.message, bot=bot)
+                user_has_image = _user_uni.has(alconna.Image)
+        except Exception:
+            pass
+
+        # Check if message is a command (Global Exclusion)
+        command_start = get_driver().config.command_start
+        if user_msg_text and command_start:
+            prefixes = tuple(s for s in command_start if s)
+            if prefixes and user_msg_text.startswith(prefixes):
+                logger.debug(f"Message starts with command prefix {prefixes}, skipping perception recording.")
+                return
+
+    # 6.6 如果是拦截模式，先主动记录用户的原始消息
+    if is_intercept and event:
+        try:
+            # 获取用户ID和昵称
+            real_user_id = event.get_user_id() or "user"
+            nickname = await get_sender_nickname(event, real_user_id, bot)
+
+            # 记录用户消息
+            if target.private:
+                await private_chat_recorder.record_private_message(
+                    adapter_name,
+                    real_user_id,
+                    nickname,
+                    user_msg_text,
+                    "user",
+                    has_image=user_has_image,
+                    skip_repeat_check=True,
+                )
+            else:
+                await chat_recorder.record_message(
+                    adapter_name,
+                    target.id,
+                    real_user_id,
+                    nickname,
+                    user_msg_text,
+                    "user",
+                    is_mentioned=False,
+                    has_image=user_has_image,
+                    skip_repeat_check=True,
+                )
+            logger.debug(f"Perception proactively recorded user message: {user_msg_text}")
+        except Exception as e:
+            logger.warning(f"Failed to record user message in perception: {e}")
+            logger.debug(f"Perception proactively recorded user message: {user_msg_text}")
+        except Exception as e:
+            logger.warning(f"Failed to record user message in perception: {e}")
+
+    # 7. 记录历史 (以 assistant 角色)
+    image_description = None
+    if has_image and config.history_image_mode == "description":
+        try:
+            img_path = None
+            if perceived_img_bytes:
+                # 使用我们之前手动提取的字节
+                cache_dir = store.get_cache_dir("nonebot_plugin_dify")
+                save_dir = os.path.join(cache_dir, config.image_cache_dir)
+                os.makedirs(save_dir, exist_ok=True)
+
+                # 构造一个完整的伪 Image 对象，提供 ID 和名称以满足 save_pic 要求
+                import hashlib
+
+                img_id = hashlib.md5(perceived_img_bytes).hexdigest()
+                dummy_img = alconna.Image(raw=perceived_img_bytes, id=img_id, name=f"{img_id}.jpg")
+                img_path = save_pic(perceived_img_bytes, dummy_img, save_dir)
+            else:
+                # 从 uni_msg 中正常提取
+                imgs = uni_msg[alconna.Image]
+                if imgs:
+                    img = imgs[0]
+                    img_bytes = None
+                    if img.raw:
+                        img_bytes = img.raw
+                    elif img.path:
+                        import anyio
+
+                        img_bytes = await anyio.Path(str(img.path)).read_bytes()
+                    elif img.url:
+                        import httpx
+
+                        async with httpx.AsyncClient() as client:
+                            resp = await client.get(img.url, timeout=10.0)
+                            if resp.status_code == 200:
+                                img_bytes = resp.content
+
+                    if img_bytes:
+                        cache_dir = store.get_cache_dir("nonebot_plugin_dify")
+                        save_dir = os.path.join(cache_dir, config.image_cache_dir)
+                        img_path = save_pic(img_bytes, img, save_dir)
+
+            if img_path:
+                image_description = await image_description_client.generate_image_description(img_path, bot.self_id)
+        except Exception as e:
+            logger.debug(f"Perception failed to generate image description: {e}")
+
+    try:
+        if target.private:
+            # 私聊记录需要获取目标用户ID
+            actual_user_id = target.id
+            await private_chat_recorder.record_private_message(
+                adapter_name,
+                actual_user_id,
+                "Bot",
+                msg_text,
+                "assistant",
+                has_image=has_image,
+                image_description=image_description,
+                skip_repeat_check=True,
+            )
+        else:
+            group_id = target.id
+            await chat_recorder.record_message(
+                adapter_name,
+                group_id,
+                bot.self_id,
+                "Bot",
+                msg_text,
+                "assistant",
+                is_mentioned=False,
+                has_image=has_image,
+                image_description=image_description,
+                skip_repeat_check=True,
+            )
+        logger.debug(f"Perceived message from {plugin_name} recorded to history.")
+
+    except Exception as e:
+        logger.warning(f"Failed to record perceived message: {e}")
+
+    # 8. 拦截并接管
+    if is_intercept:
+        try:
+            # Event 已经在上面第6步获取到了
+            if event:
+                full_user_id = get_full_user_id(event, bot)
+                session_id = f"s-{full_user_id}"
+
+                # 频率限制保护，防止死循环 (每分钟最多触发 3 次)
+                now = time.time()
+                session = session_manager.get_session(session_id, full_user_id)
+                if now - session.proactive_last_reset > 60:
+                    session.proactive_count = 0
+                    session.proactive_last_reset = now
+
+                if session.proactive_count >= 3:
+                    logger.warning(
+                        f"Proactive trigger suppressed for {full_user_id} due to rate limit (loop protection)."
+                    )
+                    return
+
+                session.proactive_count += 1
+
+                # 标记该事件已被拦截接管，防止主处理器重复触发 (如在 Linger Mode 下)
+                setattr(event, "_dify_intercepted", True)
+
+                # 异步发起 Dify 回复
+                # 使用标准的 XML 标签封装感知结果，与 dify_bot.py 的风格保持一致
+                inner_content = msg_text or (f"感知到图片描述: {image_description}" if image_description else "")
+                final_query = f'<perceived_result plugin="{plugin_name}">{inner_content}</perceived_result>'
+
+                # 提取原用户消息内容用于提示 (Safe Mode)
+                user_msg_text = ""
+                user_has_image = False
+                try:
+                    if hasattr(event, "get_plain_text"):
+                        user_msg_text = event.get_plain_text()
+                    elif hasattr(event, "get_plaintext"):
+                        user_msg_text = event.get_plaintext()
+
+                    if hasattr(event, "message"):
+                        # Convert to UniMessage to safely check for images
+                        _user_uni = await alconna.UniMessage.generate(message=event.message, bot=bot)
+                        user_has_image = _user_uni.has(alconna.Image)
+                except Exception as e:
+                    logger.warning(f"Failed to extract original user message content: {e}")
+
+                asyncio.create_task(
+                    send_reply_message(
+                        final_query,
+                        full_user_id,
+                        session_id,
+                        event,
+                        bot,
+                        target,
+                        adapter_name,
+                        personalization_enabled=private_chat_manager.get_personalization_status(
+                            adapter_name, getattr(event, "user_id", "user")
+                        )
+                        if target.private and config.private_personalization_enable
+                        else False,
+                        is_proactive=True,
+                        proactive_user_hint=(
+                            f"User sent an image and said: {user_msg_text}"
+                            if user_has_image and user_msg_text.strip()
+                            else f"User sent: {user_msg_text}"
+                            if user_msg_text.strip()
+                            else "User sent an image."
+                        ),
+                    )
+                )
+                logger.info(f"Intercepted message from {plugin_name}, triggering proactive response.")
+
+                # 阻止原消息发送 (提供更丰富的 Mock 返回以兼容不同适配器)
+                raise MockApiException(
+                    result={
+                        "message_id": 0,
+                        "msg_id": 0,
+                        "id": "0",
+                        "status": "ok",
+                        "retcode": 0,
+                        "data": {"message_id": 0},
+                    }
+                )
+            else:
+                logger.error(f"Interception failed for {plugin_name}: could not retrieve current event.")
+        except MockApiException:
+            raise
+        except Exception as e:
+            logger.error(f"Failed to trigger proactive takeover: {e}")
+
+
 @receive_message.handle()
 async def handle_message(bot: Bot, event: Event):
     """处理接收到的消息"""
+    # 如果该事件已被跨插件感知逻辑拦截接管，则主处理器不再处理，防止双重回复
+    if getattr(event, "_dify_intercepted", False):
+        logger.debug("Message already handled by perception takeover, skipping main handler.")
+        return
+
     try:
         # 获取消息目标适配器
         target = alconna.get_target()
@@ -477,9 +864,15 @@ async def handle_message(bot: Bot, event: Event):
                 except Exception as e:
                     logger.warning(f"Failed to check personalization status for user {user_id}: {e}")
                     personalization_enabled = False
+
             else:
                 personalization_enabled = False
                 logger.debug("Private chat personalization is globally disabled")
+
+            # 如果该事件已被接管，记录后直接返回，不进行回复
+            if getattr(event, "_dify_intercepted", False):
+                logger.debug("Message handled by perception request, skipping private reply.")
+                return
         else:
             # 处理群聊消息
             is_mentioned = event.is_tome()
@@ -566,6 +959,12 @@ async def handle_message(bot: Bot, event: Event):
                 except Exception as e:
                     logger.warning(f"Failed to record group message: {e}")
 
+                # 如果该事件已被接管，记录后直接返回，不进行回复
+                # 注意：Linger 模式的计数器可能已经增加，这没问题，因为感知回复也被视为一次交互
+                if getattr(event, "_dify_intercepted", False):
+                    logger.debug("Message handled by perception request, skipping group reply.")
+                    return
+
             # --- Priority 3: Proactive Intervention Check (Only if not mentioned) ---
             else:
                 # 1. Any incoming message breaks the silence, so cancel pending tasks
@@ -594,6 +993,10 @@ async def handle_message(bot: Bot, event: Event):
                     )
                 except Exception as e:
                     logger.warning(f"Failed to record group message: {e}")
+
+                if getattr(event, "_dify_intercepted", False):
+                    logger.debug("Message handled by perception request, skipping group reply.")
+                    return
 
                 # 3. Check if we should start a new proactive observation
                 if not is_targeted_at_others and config.proactive_mode_enable and group_state:
@@ -876,6 +1279,7 @@ async def send_reply_message(
     at_user_ids: list[str] = None,
     is_linger: bool = False,
     is_proactive: bool = False,
+    proactive_user_hint: str = None,
 ) -> None:
     """发送回复消息"""
     user_id = event.get_user_id() or "user"
@@ -892,6 +1296,7 @@ async def send_reply_message(
             at_user_ids=at_user_ids,
             is_linger=is_linger,
             is_proactive=is_proactive,
+            proactive_user_hint=proactive_user_hint,
         )
 
         # 检查是否为静默回复（Linger Mode 或 Proactive Mode）
@@ -906,27 +1311,13 @@ async def send_reply_message(
             logger.warning(f"Failed to build reply message: {e}")
             _uni_message = alconna.UniMessage(str(reply_content[0]) if reply_content else "抱歉，回复生成失败。")
 
-        # 发送消息
-        try:
-            if target.private or is_proactive or is_linger:
-                send_msg = await _uni_message.export()
-            else:
-                send_msg = await alconna.UniMessage([alconna.At("user", user_id), "\n", _uni_message]).export()
-        except Exception as e:
-            logger.warning(f"Failed to export message: {e}")
-            send_msg = str(reply_content[0]) if reply_content else "抱歉，消息发送失败。"
-
         # 记录机器人回复
         try:
             if target.private:
                 if personalization_enabled:
                     cleaned_reply = clean_message_for_record(_uni_message)
                     await private_chat_recorder.record_private_message(
-                        adapter_name,
-                        user_id,
-                        "Bot",
-                        cleaned_reply,
-                        "assistant",
+                        adapter_name, user_id, "Bot", cleaned_reply, "assistant"
                     )
                     logger.debug(f"Recorded private chat bot response for {user_id}")
             else:
@@ -938,13 +1329,36 @@ async def send_reply_message(
         except Exception as e:
             logger.warning(f"Failed to record bot reply: {e}")
 
-        await receive_message.finish(send_msg)
+        # 发送消息
+        # 在调用 API 时注入内部标记，防止被自身的拦截器二次拦截
+        try:
+            # 统一使用 call_api 以支持注入自定义元数据 _dify_internal
+            local_params = {"_dify_internal": True}
 
-    except FinishedException:
-        raise
+            # 判定是否需要艾特回去：只有在非私聊、非主动接管、非余韵模式下才艾特
+            if target.private or is_proactive or is_linger:
+                final_msg = _uni_message
+            else:
+                final_msg = alconna.UniMessage([alconna.At("user", user_id), "\n", _uni_message])
+
+            # 为特定的 bot 导出消息格式
+            msg_export = await final_msg.export(bot, fallback=True)
+            local_params["message"] = msg_export
+
+            # 手动构造参数以兼容不同适配器（补充您之前的修正逻辑）
+            if target.private:
+                local_params["message_type"] = "private"
+                local_params["user_id"] = int(target.id) if target.id.isdigit() else target.id
+            else:
+                local_params["message_type"] = "group"
+                local_params["group_id"] = int(target.id) if target.id.isdigit() else target.id
+
+            await bot.call_api("send_msg", **local_params)
+        except Exception as e:
+            logger.error(f"[DIFY] Failed to send response: {e}")
+
     except Exception as e:
         logger.error(f"Failed to generate reply: {e}")
-        await receive_message.finish("")
 
 
 async def build_reply_message(reply_types: List[ReplyType], reply_contents: List[str]) -> alconna.UniMessage:

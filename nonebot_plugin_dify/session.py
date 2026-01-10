@@ -1,4 +1,5 @@
 import time
+import asyncio
 from dataclasses import dataclass, field
 from cachetools import TTLCache
 from nonebot import logger
@@ -15,6 +16,9 @@ class Session:
     user: str
     conversation_id: str = ""
     message_counter: int = 0
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    proactive_count: int = 0
+    proactive_last_reset: float = field(default_factory=time.time)
 
 
 @dataclass

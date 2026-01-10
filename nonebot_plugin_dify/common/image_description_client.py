@@ -53,7 +53,7 @@ async def generate_image_description(image_path: str, user: str) -> Optional[str
         logger.debug(f"Uploaded image for description, file_id: {file_id}")
 
         # Call the workflow with the uploaded file
-        async with httpx.AsyncClient(timeout=httpx.Timeout(config.dify_timeout_in_seconds)) as client:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(config.dify_api_timeout)) as client:
             payload = {
                 "inputs": {},
                 "response_mode": "blocking",

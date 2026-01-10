@@ -36,25 +36,34 @@ class DifyBot:
         at_user_ids: Optional[List[str]] = None,
         is_linger: bool = False,
         is_proactive: bool = False,
+        proactive_user_hint: str = None,
     ):
         logger.info(f"[DIFY] query={query.strip()}")
         logger.debug(f"[DIFY] dify_user={full_user_id}")
+
+        # If proactive mode is on but no hint is provided, we should probably warn or fallback
+        if is_proactive and not proactive_user_hint:
+            logger.warning(
+                "Proactive mode is enabled but no proactive_user_hint provided. Defaulting to query as context."
+            )
 
         try:
             session = session_manager.get_session(session_id, full_user_id)
             logger.debug(f"[DIFY] session_id={session_id} query={query.strip()}")
 
-            _reply_type_list, _reply_content_list = await self._reply_internal(
-                query,
-                full_user_id,
-                session,
-                personalization_enabled,
-                replied_message=replied_message,
-                replied_image_path=replied_image_path,
-                at_user_ids=at_user_ids,
-                is_linger=is_linger,
-                is_proactive=is_proactive,
-            )
+            async with session.lock:
+                _reply_type_list, _reply_content_list = await self._reply_internal(
+                    query,
+                    full_user_id,
+                    session,
+                    personalization_enabled,
+                    replied_message=replied_message,
+                    replied_image_path=replied_image_path,
+                    at_user_ids=at_user_ids,
+                    is_linger=is_linger,
+                    is_proactive=is_proactive,
+                    proactive_user_hint=proactive_user_hint,
+                )
 
             if not _reply_type_list:
                 # Linger mode silent handling
@@ -101,6 +110,7 @@ class DifyBot:
         at_user_ids: Optional[List[str]] = None,
         is_linger: bool = False,
         is_proactive: bool = False,
+        proactive_user_hint: str = None,
     ):
         try:
             session_manager.count_user_message(session)  # 限制一个conversation中消息数
@@ -157,6 +167,7 @@ class DifyBot:
                 replied_message=replied_message,
                 at_user_ids=at_user_ids,
                 is_proactive=is_proactive,
+                proactive_user_hint=proactive_user_hint,
             )
 
             if dify_app_type in ("chatbot", "chatflow"):
@@ -193,6 +204,7 @@ class DifyBot:
         replied_message=None,
         at_user_ids: Optional[List[str]] = None,
         is_proactive: bool = False,
+        proactive_user_hint: str = None,
     ) -> Tuple[str, Optional[str]]:
         """构建包含画像和历史记录的最终查询字符串"""
         adapter_name = self._extract_adapter_name(full_user_id)
@@ -214,8 +226,16 @@ class DifyBot:
                 replied_message_str = f"<replied_message>\n{replied_text}\n</replied_message>\n"
 
         # --- 处理私聊个性化 ---
-        if is_private_chat and personalization_enabled:
-            query, conversation_id = await self._build_private_chat_query(query, adapter_name, user_id, conversation_id)
+        if is_private_chat and (personalization_enabled or is_proactive):
+            query, conversation_id = await self._build_private_chat_query(
+                query,
+                adapter_name,
+                user_id,
+                conversation_id,
+                personalization_enabled=personalization_enabled,
+                is_proactive=is_proactive,
+                proactive_user_hint=proactive_user_hint,
+            )
             return replied_message_str + query, conversation_id
 
         # --- 处理群聊（原有逻辑）---
@@ -298,8 +318,25 @@ class DifyBot:
             )
 
         # --- 组合最终查询 ---
-        current_query = f"{user_id}: {query}"
-        final_query = f"{proactive_hint}{group_profile_str}{sender_persona_str}{personalization_str}{history_str}{replied_message_str}<user_query>\n{current_query}\n</user_query>"
+        if is_proactive and proactive_user_hint:
+            # Proactive Mode:
+            # 1. User Query -> System Hint describing what user did.
+            # 2. Tool Output (original 'query') -> Placed in context as <perceived_tool_output> or similar,
+            #    but since 'query' already contains <perceived_result>, we just prepend it to the context.
+
+            # We treat the original 'query' (which is the tool output) as context.
+            # And we treat 'proactive_user_hint' as the fake user query to trigger the LLM.
+
+            # 'query' here is expected to be the <perceived_result> XML block from __init__.py
+            perceived_context = query
+
+            final_query = f"{proactive_hint}{group_profile_str}{sender_persona_str}{personalization_str}{history_str}{replied_message_str}{perceived_context}<user_query>\n[System Event: {proactive_user_hint}]\n</user_query>"
+
+            logger.debug(f"[DIFY] Proactive Context Constructed: Hint='{proactive_user_hint}'")
+        else:
+            # Standard Mode
+            current_query = f"{user_id}: {query}"
+            final_query = f"{proactive_hint}{group_profile_str}{sender_persona_str}{personalization_str}{history_str}{replied_message_str}<user_query>\n{current_query}\n</user_query>"
 
         logger.debug(
             f"[DIFY] 已拼接上下文到查询 (含发送者画像: {bool(sender_persona_str)}, 含群画像: {bool(group_profile_str)}, 主动介入: {is_proactive})"
@@ -307,56 +344,67 @@ class DifyBot:
         return final_query, conversation_id
 
     async def _build_private_chat_query(
-        self, query: str, adapter_name: str, user_id: str, conversation_id: str
+        self,
+        query: str,
+        adapter_name: str,
+        user_id: str,
+        conversation_id: str,
+        personalization_enabled: bool = False,
+        is_proactive: bool = False,
+        proactive_user_hint: str = None,
     ) -> Tuple[str, Optional[str]]:
         """构建私聊个性化查询字符串"""
         try:
             # --- 加载用户画像和个性化数据 ---
             sender_persona_str = ""
             personalization_str = ""
-
-            try:
-                user_profile = user_profile_memory.get(adapter_name, user_id)
-                if user_profile:
-                    sender_persona_str = f"<sender_persona>\n{user_profile}\n</sender_persona>\n"
-            except Exception as e:
-                logger.warning(f"Failed to load user profile: {e}")
-
-            try:
-                personalization = user_personalization_memory.get(adapter_name, user_id)
-                if personalization:
-                    personalization_str = f"<personalization>\n{personalization}\n</personalization>\n"
-            except Exception as e:
-                logger.warning(f"Failed to load user personalization: {e}")
-
-            # --- 获取私聊历史记录 ---
             history_str = ""
-            try:
-                recent_messages = await private_chat_recorder.get_recent_private_messages(
-                    adapter_name, user_id, limit=config.private_chat_history_limit
-                )
 
-                if recent_messages:
-                    conversation_id = None
+            if personalization_enabled:
+                try:
+                    user_profile = user_profile_memory.get(adapter_name, user_id)
+                    if user_profile:
+                        sender_persona_str = f"<sender_persona>\n{user_profile}\n</sender_persona>\n"
+                except Exception as e:
+                    logger.warning(f"Failed to load user profile: {e}")
 
-                    filtered_messages = []
-                    for msg in recent_messages:
-                        if not (msg.get("role") == "user" and msg.get("message") == query):
-                            filtered_messages.append(msg)
+                try:
+                    personalization = user_personalization_memory.get(adapter_name, user_id)
+                    if personalization:
+                        personalization_str = f"<personalization>\n{personalization}\n</personalization>\n"
+                except Exception as e:
+                    logger.warning(f"Failed to load user personalization: {e}")
 
-                    if filtered_messages:
-                        content = private_chat_recorder.limit_private_chat_history_length(
-                            filtered_messages, config.private_chat_history_size
-                        )
-                        history_str = f"<history>\n{content}\n</history>\n"
-            except Exception as e:
-                logger.warning(f"Failed to load private chat history: {e}")
+                # --- 获取私聊历史记录 ---
+                try:
+                    recent_messages = await private_chat_recorder.get_recent_private_messages(
+                        adapter_name, user_id, limit=config.private_chat_history_limit
+                    )
+
+                    if recent_messages:
+                        conversation_id = None
+
+                        filtered_messages = []
+                        for msg in recent_messages:
+                            if not (msg.get("role") == "user" and msg.get("message") == query):
+                                filtered_messages.append(msg)
+
+                        if filtered_messages:
+                            content = private_chat_recorder.limit_private_chat_history_length(
+                                filtered_messages, config.private_chat_history_size
+                            )
+                            history_str = f"<history>\n{content}\n</history>\n"
+                except Exception as e:
+                    logger.warning(f"Failed to load private chat history: {e}")
 
             # --- 组合最终查询 ---
-            current_query = f"User: {query}"
-            final_query = (
-                f"{sender_persona_str}{personalization_str}{history_str}<user_query>\n{current_query}\n</user_query>"
-            )
+            if is_proactive and proactive_user_hint:
+                # Proactive Mode for Private Chat
+                perceived_context = query
+                final_query = f"{sender_persona_str}{personalization_str}{history_str}{perceived_context}<user_query>\n[System Event: {proactive_user_hint}]\n</user_query>"
+            else:
+                current_query = f"User: {query}"
+                final_query = f"{sender_persona_str}{personalization_str}{history_str}<user_query>\n{current_query}\n</user_query>"
 
             logger.debug(
                 f"[DIFY] 已拼接私聊上下文到查询 (含画像: {bool(sender_persona_str or personalization_str)}, 含历史: {bool(history_str)})"
@@ -451,7 +499,7 @@ class DifyBot:
                 "user": session.user,
             }
 
-            async with httpx.AsyncClient(timeout=httpx.Timeout(config.dify_timeout_in_seconds)) as client:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(config.dify_api_timeout)) as client:
                 response = await client.post(
                     f"{config.dify_api_base}/chat-messages",
                     headers=self._get_headers(),
@@ -502,7 +550,7 @@ class DifyBot:
         try:
             payload = {"inputs": {"query": query}, "response_mode": "blocking", "user": session.user}
 
-            async with httpx.AsyncClient(timeout=httpx.Timeout(config.dify_timeout_in_seconds)) as client:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(config.dify_api_timeout)) as client:
                 response = await client.post(
                     f"{config.dify_api_base}/workflows/run",
                     headers=self._get_headers(),

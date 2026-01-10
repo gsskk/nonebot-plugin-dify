@@ -30,16 +30,16 @@ class UserMemoryManager:
         self.adapter_name = adapter_name
         self._client: Optional[httpx.AsyncClient] = None
         # Use configurable parameters
-        self._max_retries = plugin_config.api_max_retries
-        self._base_delay = plugin_config.api_retry_base_delay
-        self._max_delay = plugin_config.api_retry_max_delay
-        self._circuit_breaker_threshold = plugin_config.api_circuit_breaker_threshold
-        self._circuit_breaker_timeout = plugin_config.api_circuit_breaker_timeout
+        self._max_retries = plugin_config.dify_api_max_retries
+        self._base_delay = plugin_config.dify_api_retry_base_delay
+        self._max_delay = plugin_config.dify_api_retry_max_delay
+        self._circuit_breaker_threshold = plugin_config.dify_api_circuit_breaker_threshold
+        self._circuit_breaker_timeout = plugin_config.dify_api_circuit_breaker_timeout
 
     async def __aenter__(self):
         """Async context manager entry"""
         self._client = httpx.AsyncClient(
-            timeout=httpx.Timeout(plugin_config.dify_timeout_in_seconds),
+            timeout=httpx.Timeout(plugin_config.dify_api_timeout),
             limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
         )
         return self

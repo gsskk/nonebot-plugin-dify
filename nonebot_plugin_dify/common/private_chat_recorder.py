@@ -3,9 +3,10 @@ import asyncio
 import re
 from pathlib import Path
 from datetime import datetime, timedelta
-from typing import List, Dict, Literal
+from typing import List, Dict, Literal, Optional
 
 import nonebot_plugin_localstore as store
+
 from nonebot.log import logger
 
 from ..config import config
@@ -13,6 +14,7 @@ from .data_validator import DataValidator, DataValidationError
 
 # Use an asyncio Lock to prevent concurrent file write conflicts
 _file_lock = asyncio.Lock()
+_last_private_messages: Dict[str, Dict] = {}
 
 
 def _get_private_log_dir(adapter_name: str) -> Path:
@@ -75,7 +77,8 @@ async def record_private_message(
     message: str,
     role: Literal["user", "assistant"],
     has_image: bool = False,
-    image_description: str = None,
+    image_description: Optional[str] = None,
+    skip_repeat_check: bool = False,
 ) -> None:
     """
     Asynchronously record a single private chat message to local file.
@@ -89,6 +92,7 @@ async def record_private_message(
         role: Either 'user' or 'assistant'
         has_image: Whether the message contains an image
         image_description: Description of the image (if generated)
+        skip_repeat_check: Whether to skip repeat detection (used for perceived messages)
     """
     try:
         # Validate input parameters
@@ -108,19 +112,26 @@ async def record_private_message(
             logger.warning(f"Failed to clean message for recording: {e}")
             cleaned_message = message[: config.message_max_length]
 
-        log_entry = {
+        is_repeat = False
+        if not skip_repeat_check:
+            last_msg = _last_private_messages.get(validated_user_id)
+            if last_msg:
+                if last_msg.get("text") == cleaned_message and last_msg.get("has_image") == has_image:
+                    is_repeat = True
+            _last_private_messages[validated_user_id] = {"text": cleaned_message, "has_image": has_image}
+
+        from typing import Any
+
+        log_entry: Dict[str, Any] = {
             "timestamp": now.strftime("%Y-%m-%dT%H:%M:%S"),
             "role": role,
             "user_id": validated_user_id,
             "nickname": nickname,
             "message": cleaned_message,
+            "is_repeat": is_repeat,
+            "has_image": has_image,
+            "image_description": image_description,
         }
-
-        # Add image metadata if present
-        if has_image:
-            log_entry["has_image"] = True
-            if image_description:
-                log_entry["image_description"] = image_description
 
         # Validate the complete log entry
         try:

@@ -123,8 +123,8 @@ async def process_user_profiles(users: List[Tuple[str, str]]) -> None:
         # Use async context manager for efficient connection reuse
         async with UserMemoryManager(adapter_name) as memory_manager:
             # Use batch processing with configurable parameters
-            batch_size = min(config.api_batch_size, len(user_ids))
-            delay_between_batches = config.api_batch_delay
+            batch_size = min(config.dify_api_batch_size, len(user_ids))
+            delay_between_batches = config.dify_api_batch_delay
 
             success_count, user_count = await memory_manager.batch_update_users(
                 user_ids, batch_size=batch_size, delay_between_batches=delay_between_batches

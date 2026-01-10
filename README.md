@@ -53,9 +53,24 @@ plugins = ["nonebot_plugin_dify"]
 | DIFY_API_BASE | 否 | https://api.dify.ai/v1 | DIFY API地址，支持自建 |
 | DIFY_MAIN_APP_API_KEY | 是 |          N/A           | DIFY主APP的API KEY |
 | DIFY_MAIN_APP_TYPE | 否 |        chatbot         | DIFY主APP的类型：chatbot/chatflow，agent，workflow |
-| DIFY_TIMEOUT_IN_SECONDS | 否 |           90           | DIFY接口超时时间（单位秒） |
+| DIFY_API_TIMEOUT | 否 |           90           | DIFY接口超时时间（单位秒） |
+
+### 跨插件感知 (Cross-Plugin Perception)
+
+**全新功能！** 允许 AI 感知并“记住”群内其他插件（如天气、新闻、搜图）的输出，甚至能拦截并接管这些输出，统一由 AI 组织语言回复。
+
+| 配置项 | 必填 | 默认值 | 说明 |
+|:-----:|:----:|:---:|:---|
+| PERCEPTION_ENABLED | 否 | False | 是否开启跨插件感知功能 |
+| PERCEPTION_PASSIVE_PLUGINS | 否 | [] | **感知名单**：仅静默记录插件输出到上下文，Bot 不主动接话 |
+| PERCEPTION_INTERCEPT_PLUGINS | 否 | [] | **接管名单**：拦截并“掐掉”原插件消息，由 AI 重新转述输出 |
+
+**使用场景**:
+1. **统一 Bot 身份**: 将 `nonebot_plugin_weather` 加入 `PERCEPTION_INTERCEPT_PLUGINS`。当用户查天气时，原插件的生硬文本会消失，取而代之的是 Dify AI 甜美的播报。
+2. **增强长期记忆**: 将高频插件加入 `PERCEPTION_PASSIVE_PLUGINS`。即便用户没艾特 AI，AI 也会默默记住刚才发生了什么。
 
 ### 会话管理
+
 
 | 配置项 | 必填 |          默认值           | 说明 |
 |:-----:|:----:|:----------------------:|:----------------------------------------------------------------:|
@@ -117,7 +132,7 @@ plugins = ["nonebot_plugin_dify"]
    - **开始节点**: 添加一个 `File` 类型的输入变量（用于接收图片）。
 
 2. **配置 LLM 节点**:
-   - 添加一个支持视觉的 LLM 节点（如 GPT-4V、Claude 3 等）。
+   - 添加一个支持视觉的 LLM 节点。
    - 将图片文件连接到 LLM 的图片输入。
    - 使用以下系统提示词：
 
@@ -265,7 +280,10 @@ SESSION_SHARE_IN_GROUP=true
 IGNORE_PREFIX=["/", ".", "!"]
 IMAGE_UPLOAD_ENABLE=true
 PROFILER_WORKFLOW_API_KEY=workflow-key
+PERCEPTION_ENABLED=true
+PERCEPTION_INTERCEPT_PLUGINS=["nonebot_plugin_weather"]
 ```
+
 
 <details>
 <summary>点击查看完整的配置变量映射表</summary>
@@ -296,13 +314,6 @@ PROFILER_WORKFLOW_API_KEY=workflow-key
 | DIFY_PRIVATE_PROFILER_MIN_MESSAGES | PRIVATE_PROFILER_MIN_MESSAGES | 已弃用 |
 | DIFY_PRIVATE_PROFILER_SCHEDULE | PRIVATE_PROFILER_SCHEDULE | 已弃用 |
 | DIFY_PRIVATE_DATA_RETENTION_DAYS | PRIVATE_DATA_RETENTION_DAYS | 已弃用 |
-| DIFY_API_MAX_RETRIES | API_MAX_RETRIES | 已弃用 |
-| DIFY_API_RETRY_BASE_DELAY | API_RETRY_BASE_DELAY | 已弃用 |
-| DIFY_API_RETRY_MAX_DELAY | API_RETRY_MAX_DELAY | 已弃用 |
-| DIFY_API_CIRCUIT_BREAKER_THRESHOLD | API_CIRCUIT_BREAKER_THRESHOLD | 已弃用 |
-| DIFY_API_CIRCUIT_BREAKER_TIMEOUT | API_CIRCUIT_BREAKER_TIMEOUT | 已弃用 |
-| DIFY_API_BATCH_SIZE | API_BATCH_SIZE | 已弃用 |
-| DIFY_API_BATCH_DELAY | API_BATCH_DELAY | 已弃用 |
 
 </details>
 
@@ -381,15 +392,18 @@ Your input is a single block of text containing several data tags. You must pars
 - `<personalization>`: **Primary Directive.** If present, its instructions for your personality and tone override all other rules. This is your core identity.
 - `<group_profile>`: Background data on the group's dynamics and interests. Use this to align your tone and topics with the group.
 - `<sender_persona>`: **Specific persona for the current sender.** In group chats, these are brief tags. In private chats, this is a detailed user profile. Use this to tailor your response specifically to the person you are talking to right now.
+- `<perceived_result>`: **Sensor data or intercepted output.** Contains data from other plugins (e.g., weather, face recognition). Use the `plugin` attribute to identify the source.
 - `<history>`: The immediate preceding conversation. Format: `Nickname(ID): message`. Use this for situational awareness.
 - `<user_query>`: The specific message aimed at you.
 
 [RESPONSE_LOGIC]
 1.  **Identity:** NEVER identify as an AI, model, or bot. You are a participant. Refer to yourself as 'I'.
 2.  **Conciseness:** Get to the point. Use short, natural language. Avoid long paragraphs.
-3.  **Silence Policy:** If the conversation is irrelevant, or if you are observing as a bystander and have nothing highly valuable or unique to contribute, output exactly `<IGNORE>` (or an empty string). This is critical for avoiding noise in group chats.
-4.  **Safety:** For sensitive topics (health, finance, legal), provide a brief, helpful thought, then ALWAYS add a disclaimer like: 'Just my two cents, but I'm not an expert, so it's best to check with a professional.'
-5.  **Default Behavior:** If `<personalization>` is empty, act as a generally curious and observant friend.
+3.  **Perception Handling:** If `<perceived_result>` is present, you must "voice" or comment on this data using your personality. Do not repeat the raw tags; instead, translate the facts into a natural conversational response.
+4.  **Silence Policy:** If the conversation is irrelevant, or if you are observing as a bystander and have nothing highly valuable or unique to contribute, output exactly `<IGNORE>` (or an empty string). This is critical for avoiding noise in group chats.
+5.  **Safety:** For sensitive topics (health, finance, legal), provide a brief, helpful thought, then ALWAYS add a disclaimer like: 'Just my two cents, but I'm not an expert, so it's best to check with a professional.'
+6.  **Default Behavior:** If `<personalization>` is empty, act as a generally curious and observant friend.
+
 6.  **Hierarchy:** Your response should directly address the `<user_query>`.
     - **Adaptation:** Use `<sender_persona>` to tailor your tone and content to the current speaker.
     - **Constraint:** Always follow `<personalization>` as your highest priority. Use `<group_profile>` and `<history>` for situational awareness.

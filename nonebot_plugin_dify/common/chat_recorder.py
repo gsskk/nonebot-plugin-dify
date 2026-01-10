@@ -2,7 +2,7 @@ import json
 import asyncio
 from pathlib import Path
 from datetime import datetime, timedelta
-from typing import List, Dict, Literal
+from typing import List, Dict, Literal, Optional
 
 import nonebot_plugin_localstore as store
 from nonebot.log import logger
@@ -10,7 +10,7 @@ from nonebot.log import logger
 # 使用一个 asyncio Lock 来防止并发写入文件时发生冲突
 _file_lock = asyncio.Lock()
 # 用于存储每个群组的最后一条消息，以检测复读
-_last_messages: Dict[str, str] = {}
+_last_messages: Dict[str, Dict] = {}
 
 
 def _get_log_dir(adapter_name: str) -> Path:
@@ -35,22 +35,19 @@ async def record_message(
     role: Literal["user", "assistant"],
     is_mentioned: bool,
     has_image: bool = False,
-    image_description: str = None,
+    image_description: Optional[str] = None,
+    skip_repeat_check: bool = False,
 ):
-    """
-    异步地将单条聊天消息记录到本地文件。
-    会检测并标记复读消息。
-    日志文件会每日轮转。
-
-    Args:
-        has_image: 是否包含图片
-        image_description: 图片描述（如果已生成）
-    """
     now = datetime.now()
 
-    # 检测是否为复读消息
-    is_repeat = _last_messages.get(group_id) == message
-    _last_messages[group_id] = message  # 更新最后一条消息
+    is_repeat = False
+    if not skip_repeat_check:
+        last_msg = _last_messages.get(group_id)
+        if last_msg:
+            if last_msg.get("text") == message and last_msg.get("has_image") == has_image:
+                is_repeat = True
+
+        _last_messages[group_id] = {"text": message, "has_image": has_image}
 
     log_entry = {
         "timestamp": now.strftime("%Y-%m-%dT%H:%M:%S"),
