@@ -123,7 +123,7 @@ async def record_private_message(
         from typing import Any
 
         log_entry: Dict[str, Any] = {
-            "timestamp": now.strftime("%Y-%m-%dT%H:%M:%S"),
+            "timestamp": now.strftime("%Y-%m-%dT%H:%M:%S.%f"),
             "role": role,
             "user_id": validated_user_id,
             "nickname": nickname,

@@ -50,7 +50,7 @@ async def record_message(
         _last_messages[group_id] = {"text": message, "has_image": has_image}
 
     log_entry = {
-        "timestamp": now.strftime("%Y-%m-%dT%H:%M:%S"),
+        "timestamp": now.strftime("%Y-%m-%dT%H:%M:%S.%f"),
         "role": role,
         "user_id": user_id,
         "nickname": nickname,

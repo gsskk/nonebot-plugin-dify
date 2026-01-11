@@ -220,6 +220,9 @@ class Config(BaseModel):
     perception_intercept_plugins: Set[str] = set()
     """主动接管名单：拦截并取消原消息发送，改由 AI 以自己的口吻代为回复"""
 
+    perception_intercept_commands: Set[str] = set()
+    """命令拦截白名单：即使插件不在拦截名单中，如果用户消息以这些指令开头，也会触发拦截（例如 {"/weather"}）"""
+
     # System Monitoring
     system_admin_user_id: Optional[str] = None
     """用于接收系统关键告警的管理员的“完整用户ID”，可以通过私聊机器人发送 /get_my_id 命令获取"""

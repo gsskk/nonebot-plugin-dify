@@ -42,20 +42,88 @@ async def handle_perception(bot: Bot, api: str, data: Dict[str, Any]):
     if plugin_name == "nonebot_plugin_dify":
         return
 
-    # 3. 过滤名单
-    # 增加调试日志以确认配置项内容
-    logger.debug(
-        f"Perception Config: passive={config.perception_passive_plugins}, intercept={config.perception_intercept_plugins}"
-    )
+    # 3. 过滤名单与策略判定
+    # 3.1 预先提取 User Event 内容 (用于判定基于命令的拦截)
+    user_msg_text = ""
+    user_has_image = False
+    event = None
+    try:
+        # 尝试获取 Event
+        try:
+            event = current_event.get()
+        except LookupError:
+            event = getattr(matcher, "event", None)
 
-    is_intercept = plugin_name in config.perception_intercept_plugins
-    # 如果在拦截名单里，就不再属于被动观察名单
+        if event:
+            if hasattr(event, "get_plain_text"):
+                user_msg_text = event.get_plain_text()
+            elif hasattr(event, "get_plaintext"):
+                user_msg_text = event.get_plaintext()
+
+            if hasattr(event, "message"):
+                _user_uni = await alconna.UniMessage.generate(message=event.message, bot=bot)
+                user_has_image = _user_uni.has(alconna.Image)
+    except Exception:
+        pass
+
+    # 3.2 判定拦截与观察
+    # A. 插件显式在拦截名单
+    is_plugin_intercept = plugin_name in config.perception_intercept_plugins
+
+    # B. 命令强制拦截 (即使插件不在拦截名单)
+    # B. 命令强制拦截 (即使插件不在拦截名单)
+    is_command_intercept = False
+    if user_msg_text:
+        target_cmds = config.perception_intercept_commands
+        if target_cmds:
+            # 1. 直接匹配 (用户配置了完整命令如 "/weather")
+            direct_prefixes = tuple(s for s in target_cmds if s)
+            if user_msg_text.startswith(direct_prefixes):
+                is_command_intercept = True
+
+            # 2. 组合匹配 (用户只配置了命令名如 "weather", 需结合系统命令前缀)
+            if not is_command_intercept:
+                command_start = get_driver().config.command_start
+                # command_start 可能是 None 或空集合，默认为 {"/"} 以防万一
+                sys_prefixes = command_start if command_start else {"/"}
+
+                # 生成所有可能的组合: prefix + cmd (e.g., "/" + "weather")
+                combined_prefixes = []
+                for cmd in target_cmds:
+                    for prefix in sys_prefixes:
+                        combined_prefixes.append(f"{prefix}{cmd}")
+
+                if combined_prefixes and user_msg_text.startswith(tuple(combined_prefixes)):
+                    is_command_intercept = True
+
+            if is_command_intercept:
+                logger.info(
+                    f"Command '{user_msg_text}' matched intercept list, FORCING interception of plugin {plugin_name}."
+                )
+
+    # 最终拦截状态
+    is_intercept = is_plugin_intercept or is_command_intercept
+
+    # C. 被动观察 (非拦截状态，且满足被动名单或通配符)
     is_observe = not is_intercept and (
         plugin_name in config.perception_passive_plugins or not config.perception_passive_plugins
     )
 
     if not (is_intercept or is_observe):
         return
+
+    # 3.3 命令噪音排除 (仅针对被动观察模式)
+    # 如果已经被判定为拦截 (is_intercept)，则不过滤命令，因为这正是用户想要的交互。
+    # 只有在 Monitor 模式下，我们才需要过滤掉杂七杂八的指令调用。
+    if not is_intercept:
+        command_start = get_driver().config.command_start
+        if user_msg_text and command_start:
+            prefixes = tuple(s for s in command_start if s)
+            if prefixes and user_msg_text.startswith(prefixes):
+                logger.debug(
+                    f"Message from unlisted plugin {plugin_name} starts with command prefix {prefixes}, skipping perception."
+                )
+                return
 
     # 4. 提取内容
     # 兼容不同适配器的消息字段名 (增加 Telegram 常用字段)
@@ -115,40 +183,15 @@ async def handle_perception(bot: Bot, api: str, data: Dict[str, Any]):
 
     # 6. 获取目标
     try:
-        # 优先从全局上下文获取 Event
-        try:
-            event = current_event.get()
-        except LookupError:
-            event = getattr(matcher, "event", None)
-
+        # event 已经在 3.1 获取，这里仅获取 target 和 adapter_name
         target = alconna.get_target()
         adapter_name = get_adapter_name(target)
     except Exception:
         return
 
-    # 6.5 提取原用户消息内容并检查是否需要排除 (命令)
-    user_msg_text = ""
-    user_has_image = False
-    if event:
-        try:
-            if hasattr(event, "get_plain_text"):
-                user_msg_text = event.get_plain_text()
-            elif hasattr(event, "get_plaintext"):
-                user_msg_text = event.get_plaintext()
-
-            if hasattr(event, "message"):
-                _user_uni = await alconna.UniMessage.generate(message=event.message, bot=bot)
-                user_has_image = _user_uni.has(alconna.Image)
-        except Exception:
-            pass
-
-        # Check if message is a command (Global Exclusion)
-        command_start = get_driver().config.command_start
-        if user_msg_text and command_start:
-            prefixes = tuple(s for s in command_start if s)
-            if prefixes and user_msg_text.startswith(prefixes):
-                logger.debug(f"Message starts with command prefix {prefixes}, skipping perception recording.")
-                return
+    # 6.5 (已上移至 3.1 和 3.3) 提取原用户消息内容并检查是否需要排除
+    # 此处仅保留空位，变量 user_msg_text, user_has_image, event 已在上方获取
+    pass
 
     # 6.6 如果是拦截模式，先主动记录用户的原始消息
     if is_intercept and event:
@@ -335,6 +378,27 @@ async def handle_perception(bot: Bot, api: str, data: Dict[str, Any]):
                         ),
                     )
                 )
+                # 8.2 (新) 媒体透传：如果包含非文本内容（图片等），先主动发送给用户
+                # 这样可以避免拦截后图片丢失，实现“图片直通，文字接管”
+                try:
+                    # 过滤掉纯文本和At，只保留媒体片段 (Image, Video, Audio, File, etc.)
+                    media_segments = []
+                    has_media = False
+                    for seg in uni_msg:
+                        if not isinstance(seg, (alconna.Text, alconna.At)):
+                            media_segments.append(seg)
+                            has_media = True
+
+                    if has_media:
+                        logger.info(
+                            f"Intercepted message contains media, passing through {len(media_segments)} segments."
+                        )
+                        media_msg = alconna.UniMessage(media_segments)
+                        # 使用 target 和 bot 发送
+                        await media_msg.send(target, bot=bot)
+                except Exception as e:
+                    logger.warning(f"Failed to pass-through media segments: {e}")
+
                 logger.info(f"Intercepted message from {plugin_name}, triggering proactive response.")
 
                 # 阻止原消息发送 (提供更丰富的 Mock 返回以兼容不同适配器)

@@ -26,6 +26,7 @@
 | PERCEPTION_ENABLED | 否 | False | 是否开启跨插件感知功能 |
 | PERCEPTION_PASSIVE_PLUGINS | 否 | [] | **感知名单**：仅静默记录插件输出到上下文，Bot 不主动接话。<br />**注意**：留空 `[]` 表示**记录所有插件**（默认）。若需指定特定插件，请填入插件名列表，如 `["plugin_a"]`。 |
 | PERCEPTION_INTERCEPT_PLUGINS | 否 | [] | **接管名单**：拦截并“掐掉”原插件消息，由 AI 重新转述输出 |
+| PERCEPTION_INTERCEPT_COMMANDS | 否 | [] | **命令强制接管**：只要用户指令以列表中的前缀开头（如 `["/weather"]`），无论该插件是否在接管名单，都强制拦截并由 AI 回复。适合希望 AI 播报特定查询结果的场景。 |
 
 **使用场景**:
 1. **统一 Bot 身份**: 将 `nonebot_plugin_weather` 加入 `PERCEPTION_INTERCEPT_PLUGINS`。当用户查天气时，原插件的生硬文本会消失，取而代之的是 Dify AI 甜美的播报。
