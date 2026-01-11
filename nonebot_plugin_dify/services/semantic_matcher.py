@@ -53,6 +53,9 @@ class SemanticMatcher:
         if not interests:
             return 0.0
 
+        if not text or len(text.strip()) < 2:
+            return 0.0
+
         try:
             self._load_model()
 

@@ -79,6 +79,9 @@ class Config(BaseModel):
     - semantic: 缓存图片，语义匹配时附加（不可用时自动回退到 keyword）
     """
 
+    image_attachment_semantic_threshold: float = 0.60
+    """图片关联的语义相似度阈值（0.0-1.0），默认 0.60"""
+
     # === Image Optimization ===
     image_min_size: int = 50 * 1024
     """最小图片大小（字节），小于此值的图片（如表情包）将被忽略。默认 50KB"""

@@ -65,6 +65,7 @@
 | IMAGE_DESCRIPTION_WORKFLOW_API_KEY | 否 | | 用于生成图片描述的 Dify Workflow API Key（仅 `description` 模式需要） |
 | IMAGE_REFERENCE_CACHE_TTL | 否 | 1800 | 图片引用缓存过期时间（秒），默认30分钟 |
 | IMAGE_ATTACH_MODE | 否 | "off" | 触发附加缓存图片的方式（非 off 时自动启用图片缓存）：<br />`off`=不缓存（默认），`keyword`=关键词匹配，`semantic`=语义匹配 |
+| IMAGE_ATTACHMENT_SEMANTIC_THRESHOLD | 否 | 0.60 | 语义匹配模式下的相似度阈值（0.0-1.0），默认 0.60 |
 | IMAGE_MIN_SIZE | 否 | 51200 | 最小图片大小（字节），小于此值的图片（如表情包）将被忽略（默认 50KB） |
 | IMAGE_MAX_SIZE | 否 | 1048576 | 最大图片大小（字节），大于此值的图片将被压缩（默认 1MB） |
 | IMAGE_COMPRESS_QUALITY | 否 | 80 | 图片压缩质量（1-100）（默认 80） |

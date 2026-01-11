@@ -111,7 +111,12 @@ class DifyBot:
 
             all_files = []
             # 1. 处理当前消息的图片
+            current_img_path = None
             try:
+                # Peek at the cache before it is popped by _get_upload_files
+                if session.id in USER_IMAGE_CACHE:
+                    current_img_path = USER_IMAGE_CACHE[session.id].get("path")
+
                 current_files = await self._get_upload_files(session)
                 if current_files:
                     all_files.extend(current_files)
@@ -144,13 +149,30 @@ class DifyBot:
             ):
                 cached_image_path = image_cache.get_cached_image(adapter_name, group_id, user_id)
                 if cached_image_path:
-                    try:
-                        cached_files = await self._upload_file_from_path(cached_image_path, session.user)
-                        if cached_files:
-                            all_files.extend(cached_files)
-                            logger.debug(f"Attached cached image to request: {cached_image_path}")
-                    except Exception as e:
-                        logger.warning(f"Failed to upload cached image: {e}")
+                    # Prevent duplicate attachment if the cached image is the same as the current image
+                    is_duplicate = False
+                    if current_img_path:
+                        try:
+                            current_name = os.path.splitext(os.path.basename(current_img_path))[0]
+                            cached_name = os.path.basename(cached_image_path)
+                            # Check if cached filename follows the pattern ref_{current_name}_{timestamp}.{ext}
+                            # Using loose check `ref_{current_name}_` to avoid regex overhead, ensuring simple collision avoidance
+                            if f"ref_{current_name}_" in cached_name:
+                                is_duplicate = True
+                                logger.debug(
+                                    f"Skipping cached message image {cached_name} as it is likely a duplicate of the current image."
+                                )
+                        except Exception as e:
+                            logger.warning(f"Error checking for duplicate images: {e}")
+
+                    if not is_duplicate:
+                        try:
+                            cached_files = await self._upload_file_from_path(cached_image_path, session.user)
+                            if cached_files:
+                                all_files.extend(cached_files)
+                                logger.debug(f"Attached cached image to request: {cached_image_path}")
+                        except Exception as e:
+                            logger.warning(f"Failed to upload cached image: {e}")
 
             final_query, conversation_id = await self._build_final_query(
                 query,

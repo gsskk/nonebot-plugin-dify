@@ -253,6 +253,9 @@ def _semantic_match(query: str) -> Optional[bool]:
         True/False for match result, or None if semantic matching is unavailable.
     """
     try:
+        if not query or len(query.strip()) < 2:
+            return False
+
         from ..services.semantic_matcher import SemanticMatcher
 
         matcher = SemanticMatcher.get_instance()
@@ -263,7 +266,7 @@ def _semantic_match(query: str) -> Optional[bool]:
         # get_similarity expects a Set of interests and returns max similarity
         similarity = matcher.get_similarity(query, set(IMAGE_INTENT_PHRASES))
 
-        if similarity > 0.55:  # Threshold for image intent
+        if similarity > config.image_attachment_semantic_threshold:  # Threshold for image intent
             logger.debug(f"Semantic match found: similarity={similarity:.2f}")
             return True
 
