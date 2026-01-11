@@ -79,6 +79,8 @@ async def send_reply_message(
     user_id = event.get_user_id() or "user"
 
     try:
+        has_replied = False
+
         # 获取Dify回复 (Stream)
         async for reply_type, reply_content in dify_bot.reply(
             msg_text,
@@ -144,10 +146,13 @@ async def send_reply_message(
                 local_params = {"_dify_internal": True}
 
                 # 判定是否需要艾特回去：只有在非私聊、非主动接管、非余韵模式下才艾特
-                if target.private or is_proactive or is_linger:
-                    final_msg = _uni_message
-                else:
+                # 且如果是流式输出，只在第一段艾特
+                should_at = not (target.private or is_proactive or is_linger) and not has_replied
+
+                if should_at:
                     final_msg = alconna.UniMessage([alconna.At("user", user_id), "\n", _uni_message])
+                else:
+                    final_msg = _uni_message
 
                 # 为特定的 bot 导出消息格式
                 msg_export = await final_msg.export(bot, fallback=True)
@@ -162,6 +167,7 @@ async def send_reply_message(
                     local_params["group_id"] = int(target.id) if target.id.isdigit() else target.id
 
                 await bot.call_api("send_msg", **local_params)
+                has_replied = True
             except Exception as e:
                 logger.error(f"[DIFY] Failed to send response: {e}")
 
