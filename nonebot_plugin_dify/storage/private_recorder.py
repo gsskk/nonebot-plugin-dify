@@ -10,7 +10,7 @@ import nonebot_plugin_localstore as store
 from nonebot.log import logger
 
 from ..config import config
-from .data_validator import DataValidator, DataValidationError
+from ..utils.validation import DataValidator, DataValidationError
 
 # Use an asyncio Lock to prevent concurrent file write conflicts
 _file_lock = asyncio.Lock()

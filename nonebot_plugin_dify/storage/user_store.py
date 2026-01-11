@@ -6,7 +6,7 @@ from typing import Dict
 import nonebot_plugin_localstore as store
 from nonebot.log import logger
 
-from .data_validator import DataValidator, DataValidationError
+from ..utils.validation import DataValidator, DataValidationError
 
 _user_profile_file: Path = store.get_data_file("nonebot_plugin_dify", "user_profiles.json")
 _user_personalization_file: Path = store.get_data_file("nonebot_plugin_dify", "user_personalizations.json")

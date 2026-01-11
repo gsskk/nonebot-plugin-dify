@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from cachetools import TTLCache
 from nonebot import logger
 
-from .config import config
+from ..config import config
 
 
 # 1. 用 dataclass 定义会话，清晰简洁

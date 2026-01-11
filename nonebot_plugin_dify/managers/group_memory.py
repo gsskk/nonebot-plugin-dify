@@ -12,8 +12,8 @@ from nonebot.log import logger
 from ..config import Config
 
 # from ..dify_client import DifyClient
-from .chat_recorder import get_messages_since, get_at_bot_messages_since, limit_chat_history_length
-from .group_data_store import group_profile_memory, personalization_memory, group_user_memory
+from ..storage.chat_recorder import get_messages_since, get_at_bot_messages_since, limit_chat_history_length
+from ..storage.group_store import group_profile_memory, personalization_memory, group_user_memory
 
 plugin_config = get_plugin_config(Config)
 

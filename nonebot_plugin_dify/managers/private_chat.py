@@ -6,7 +6,7 @@ from typing import Dict
 import nonebot_plugin_localstore as store
 from nonebot.log import logger
 
-from .user_data_store import user_profile_memory, user_personalization_memory
+from ..storage.user_store import user_profile_memory, user_personalization_memory
 
 _private_personalization_file: Path = store.get_data_file("nonebot_plugin_dify", "private_personalization_status.json")
 

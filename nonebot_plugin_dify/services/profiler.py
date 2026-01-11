@@ -4,8 +4,8 @@ from nonebot.log import logger
 from nonebot import get_bot
 
 from ..config import config
-from .group_memory_manager import GroupMemoryManager, get_all_profiler_statuses
-from .record_manager import get_record_status
+from ..managers.group_memory import GroupMemoryManager, get_all_profiler_statuses
+from ..storage.record_manager import get_record_status
 
 
 async def process_single_group_profile(adapter_name: str, group_id: str):

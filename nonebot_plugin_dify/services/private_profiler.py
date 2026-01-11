@@ -4,9 +4,9 @@ from typing import List, Tuple
 from nonebot.log import logger
 
 from ..config import config
-from .user_memory_manager import UserMemoryManager
-from .private_chat_manager import get_all_personalization_statuses
-from .private_chat_recorder import get_messages_since_private
+from ..managers.user_memory import UserMemoryManager
+from ..managers.private_chat import get_all_personalization_statuses
+from ..storage.private_recorder import get_messages_since_private
 
 
 async def run_private_profiling_job() -> None:

@@ -6,8 +6,8 @@ import nonebot_plugin_localstore as store
 from nonebot.log import logger
 
 from ..config import config
-from .user_data_store import user_profile_memory, user_personalization_memory
-from .private_chat_recorder import _get_private_log_dir
+from ..storage.user_store import user_profile_memory, user_personalization_memory
+from ..storage.private_recorder import _get_private_log_dir
 
 
 async def run_data_cleanup_job():
@@ -255,7 +255,7 @@ async def run_data_integrity_check():
 
 async def _check_user_data_files(stats: dict):
     """Check integrity of user profile and personalization files."""
-    from .data_validator import DataValidator
+    from ..utils.validation import DataValidator
 
     try:
         # Check user profiles file
@@ -293,7 +293,7 @@ async def _check_user_data_files(stats: dict):
 
 async def _check_chat_log_files(stats: dict):
     """Check integrity of chat log files."""
-    from .data_validator import DataValidator
+    from ..utils.validation import DataValidator
 
     try:
         base_log_dir = store.get_data_dir("nonebot_plugin_dify") / "private_chat_logs"

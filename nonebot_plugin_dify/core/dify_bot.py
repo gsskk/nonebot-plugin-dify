@@ -9,16 +9,17 @@ from nonebot import logger
 import nonebot_plugin_alconna as alconna
 
 from . import session as session_manager
-from .config import config
+from ..config import config
 from .dify_client import DifyClient, ChatClient
-from .common.utils import parse_markdown_text
-from .common.reply_type import ReplyType
-from .common import chat_recorder, record_manager, group_memory_manager
-from .common.group_data_store import group_profile_memory, personalization_memory, group_user_memory
+from ..utils.helpers import parse_markdown_text
+from ..utils.reply_type import ReplyType
+from ..storage import chat_recorder, record_manager
+from ..managers import group_memory
+from ..storage.group_store import group_profile_memory, personalization_memory, group_user_memory
 from .cache import USER_IMAGE_CACHE
-from .common import private_chat_recorder
-from .common.user_data_store import user_profile_memory, user_personalization_memory
-from .common import image_reference_cache
+from ..storage import private_recorder as private_chat_recorder
+from ..storage.user_store import user_profile_memory, user_personalization_memory
+from ..utils import image_cache
 
 
 class DifyBot:
@@ -147,9 +148,9 @@ class DifyBot:
             if (
                 config.image_upload_enable
                 and config.image_attach_mode != "off"
-                and image_reference_cache.should_attach_image(query)
+                and image_cache.should_attach_image(query)
             ):
-                cached_image_path = image_reference_cache.get_cached_image(adapter_name, group_id, user_id)
+                cached_image_path = image_cache.get_cached_image(adapter_name, group_id, user_id)
                 if cached_image_path:
                     try:
                         cached_files = await self._upload_file_from_path(cached_image_path, session.user)
@@ -248,7 +249,7 @@ class DifyBot:
         sender_persona_str = ""
 
         # Check if group personalization is enabled
-        group_profiler_enabled = group_memory_manager.get_profiler_status(adapter_name, group_id)
+        group_profiler_enabled = group_memory.get_profiler_status(adapter_name, group_id)
 
         if group_profiler_enabled:
             group_profile = group_profile_memory.get(adapter_name, group_id)

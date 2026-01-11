@@ -253,7 +253,7 @@ def _semantic_match(query: str) -> Optional[bool]:
         True/False for match result, or None if semantic matching is unavailable.
     """
     try:
-        from .semantic_matcher import SemanticMatcher
+        from ..services.semantic_matcher import SemanticMatcher
 
         matcher = SemanticMatcher.get_instance()
         if matcher is None:

@@ -1,5 +1,5 @@
 import httpx
-from .config import config
+from ..config import config
 
 
 class DifyClient:

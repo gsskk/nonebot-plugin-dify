@@ -9,8 +9,8 @@ from nonebot import get_plugin_config
 from nonebot.log import logger
 
 from ..config import Config
-from .private_chat_recorder import get_messages_since_private, limit_private_chat_history_length
-from .user_data_store import user_profile_memory, user_personalization_memory
+from ..storage.private_recorder import get_messages_since_private, limit_private_chat_history_length
+from ..storage.user_store import user_profile_memory, user_personalization_memory
 
 plugin_config = get_plugin_config(Config)
 

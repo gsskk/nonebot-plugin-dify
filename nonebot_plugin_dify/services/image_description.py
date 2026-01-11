@@ -10,7 +10,7 @@ from typing import Optional
 from nonebot import logger
 
 from ..config import config
-from ..dify_client import DifyClient
+from ..core.dify_client import DifyClient
 
 
 async def generate_image_description(image_path: str, user: str) -> Optional[str]:
