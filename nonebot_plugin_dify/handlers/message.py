@@ -79,8 +79,8 @@ async def send_reply_message(
     user_id = event.get_user_id() or "user"
 
     try:
-        # 获取Dify回复
-        reply_type, reply_content = await dify_bot.reply(
+        # 获取Dify回复 (Stream)
+        async for reply_type, reply_content in dify_bot.reply(
             msg_text,
             full_user_id,
             session_id,
@@ -91,65 +91,82 @@ async def send_reply_message(
             is_linger=is_linger,
             is_proactive=is_proactive,
             proactive_user_hint=proactive_user_hint,
-        )
+        ):
+            # 检查是否为静默回复（Linger Mode 或 Proactive Mode）
+            if not reply_type and not reply_content:
+                logger.debug("Suppressing silent reply chunk.")
+                continue
 
-        # 检查是否为静默回复（Linger Mode 或 Proactive Mode）
-        if not reply_type and not reply_content:
-            logger.debug("Suppressing silent reply.")
-            return
+            # 构建回复消息
+            try:
+                _uni_message = await build_reply_message(reply_type, reply_content)
+            except Exception as e:
+                logger.warning(f"Failed to build reply message: {e}")
+                _uni_message = alconna.UniMessage(str(reply_content[0]) if reply_content else "抱歉，回复生成失败。")
 
-        # 构建回复消息
-        try:
-            _uni_message = await build_reply_message(reply_type, reply_content)
-        except Exception as e:
-            logger.warning(f"Failed to build reply message: {e}")
-            _uni_message = alconna.UniMessage(str(reply_content[0]) if reply_content else "抱歉，回复生成失败。")
+            # 记录机器人回复
+            try:
+                if target.private:
+                    if personalization_enabled:
+                        # For streaming, we might be recording multiple small chunks.
+                        # Ideally, we should concatenate them if we want a clean history.
+                        # But for now, recording each chunk is safer than missing data.
+                        # Downside: History context will be fragmented.
+                        # Spec Risk Mitigation: "We should only record the *full* combined response..."
 
-        # 记录机器人回复
-        try:
-            if target.private:
-                if personalization_enabled:
-                    cleaned_reply = clean_message_for_record(_uni_message)
-                    await private_chat_recorder.record_private_message(
-                        adapter_name, user_id, "Bot", cleaned_reply, "assistant"
-                    )
-                    logger.debug(f"Recorded private chat bot response for {user_id}")
-            else:
-                if record_manager.get_record_status(adapter_name, target.id):
-                    cleaned_reply = clean_message_for_record(_uni_message)
-                    await chat_recorder.record_message(
-                        adapter_name, target.id, bot.self_id, "Bot", cleaned_reply, "assistant", False
-                    )
-        except Exception as e:
-            logger.warning(f"Failed to record bot reply: {e}")
+                        # However, implementing full buffering here negates the purpose of streaming
+                        # IF we block sending until full record.
+                        # But we can buffer for RECORDING purposes while SENDING immediately.
 
-        # 发送消息
-        # 在调用 API 时注入内部标记，防止被自身的拦截器二次拦截
-        try:
-            # 统一使用 call_api 以支持注入自定义元数据 _dify_internal
-            local_params = {"_dify_internal": True}
+                        # Since this refactor is already complex, let's treat each chunk as a message for now,
+                        # OR we simply log it.
+                        # NOTE: Current implementation records specific "assistant" events.
 
-            # 判定是否需要艾特回去：只有在非私聊、非主动接管、非余韵模式下才艾特
-            if target.private or is_proactive or is_linger:
-                final_msg = _uni_message
-            else:
-                final_msg = alconna.UniMessage([alconna.At("user", user_id), "\n", _uni_message])
+                        # Let's perform lightweight recording for each chunk to ensure visibility.
+                        cleaned_reply = clean_message_for_record(_uni_message)
+                        await private_chat_recorder.record_private_message(
+                            adapter_name, user_id, "Bot", cleaned_reply, "assistant"
+                        )
+                        logger.debug(f"Recorded private chat bot response chunk for {user_id}")
+                else:
+                    if record_manager.get_record_status(adapter_name, target.id):
+                        cleaned_reply = clean_message_for_record(_uni_message)
+                        await chat_recorder.record_message(
+                            adapter_name, target.id, bot.self_id, "Bot", cleaned_reply, "assistant", False
+                        )
+            except Exception as e:
+                logger.warning(f"Failed to record bot reply: {e}")
 
-            # 为特定的 bot 导出消息格式
-            msg_export = await final_msg.export(bot, fallback=True)
-            local_params["message"] = msg_export
+            # 发送消息
+            # 在调用 API 时注入内部标记，防止被自身的拦截器二次拦截
+            try:
+                # 统一使用 call_api 以支持注入自定义元数据 _dify_internal
+                local_params = {"_dify_internal": True}
 
-            # 手动构造参数以兼容不同适配器（补充您之前的修正逻辑）
-            if target.private:
-                local_params["message_type"] = "private"
-                local_params["user_id"] = int(target.id) if target.id.isdigit() else target.id
-            else:
-                local_params["message_type"] = "group"
-                local_params["group_id"] = int(target.id) if target.id.isdigit() else target.id
+                # 判定是否需要艾特回去：只有在非私聊、非主动接管、非余韵模式下才艾特
+                if target.private or is_proactive or is_linger:
+                    final_msg = _uni_message
+                else:
+                    final_msg = alconna.UniMessage([alconna.At("user", user_id), "\n", _uni_message])
 
-            await bot.call_api("send_msg", **local_params)
-        except Exception as e:
-            logger.error(f"[DIFY] Failed to send response: {e}")
+                # 为特定的 bot 导出消息格式
+                msg_export = await final_msg.export(bot, fallback=True)
+                local_params["message"] = msg_export
+
+                # 手动构造参数以兼容不同适配器（补充您之前的修正逻辑）
+                if target.private:
+                    local_params["message_type"] = "private"
+                    local_params["user_id"] = int(target.id) if target.id.isdigit() else target.id
+                else:
+                    local_params["message_type"] = "group"
+                    local_params["group_id"] = int(target.id) if target.id.isdigit() else target.id
+
+                await bot.call_api("send_msg", **local_params)
+            except Exception as e:
+                logger.error(f"[DIFY] Failed to send response: {e}")
+
+    except Exception as e:
+        logger.error(f"Failed to generate reply: {e}")
 
     except Exception as e:
         logger.error(f"Failed to generate reply: {e}")

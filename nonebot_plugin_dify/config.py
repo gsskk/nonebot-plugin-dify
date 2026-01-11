@@ -23,6 +23,15 @@ class Config(BaseModel):
     dify_main_app_type: str = "chatbot"
     """dify助手类型 chatbot(或chatflow，对应聊天助手)/agent(对应Agent)/workflow(对应工作流)，默认为chatbot"""
 
+    dify_stream_enable: bool = False
+    """是否开启流式输出模式，开启后将分段发送回复，减少感知延迟"""
+
+    dify_stream_min_interval: float = 1.5
+    """流式输出最小时间间隔（秒），避免发送过快触发平台限制"""
+
+    dify_stream_min_char: int = 10
+    """流式输出最小字符缓冲，避免发送过短的消息片段"""
+
     # Session Management
     session_max_messages: int = 20
     """会话最大消息数，超过后清空会话（由于dify不支持设置历史消息长度的限制）"""
@@ -250,9 +259,6 @@ class Config(BaseModel):
     api_batch_size: Optional[int] = None
     api_batch_delay: Optional[float] = None
     dify_timeout_in_seconds: Optional[int] = None
-    dify_observe_others: Optional[bool] = None
-    dify_observe_plugins: Optional[Set[str]] = None
-    dify_intercept_plugins: Optional[Set[str]] = None
 
     @model_validator(mode="after")
     def _handle_backward_compatibility(self) -> "Config":
@@ -293,23 +299,7 @@ class Config(BaseModel):
         if self.api_batch_size is not None:
             self.dify_api_batch_size = self.api_batch_size
 
-        # 3. Handle Cross-Plugin Perception (Fix Subject)
-        if self.dify_observe_others is not None:
-            warn_dep("dify_observe_others", "perception_enabled")
-            if not self.perception_enabled:
-                self.perception_enabled = self.dify_observe_others
-
-        if self.dify_observe_plugins is not None:
-            warn_dep("dify_observe_plugins", "perception_passive_plugins")
-            if not self.perception_passive_plugins:
-                self.perception_passive_plugins = self.dify_observe_plugins
-
-        if self.dify_intercept_plugins is not None:
-            warn_dep("dify_intercept_plugins", "perception_intercept_plugins")
-            if not self.perception_intercept_plugins:
-                self.perception_intercept_plugins = self.dify_intercept_plugins
-
-        # 4. Handle Session Settings
+        # 3. Handle Session Settings
         if self.dify_convsersation_max_messages is not None:
             warn_dep("dify_convsersation_max_messages", "session_max_messages")
             if self.session_max_messages == 20:
@@ -325,7 +315,7 @@ class Config(BaseModel):
             if not self.session_share_in_group:
                 self.session_share_in_group = self.dify_share_session_in_group
 
-        # 5. Handle Message Processing settings
+        # 4. Handle Message Processing settings
         if self.dify_ignore_prefix is not None:
             warn_dep("dify_ignore_prefix", "ignore_prefix")
             if self.ignore_prefix == {"/", "."}:
@@ -341,7 +331,7 @@ class Config(BaseModel):
             if self.message_desensitization_enable:
                 self.message_desensitization_enable = self.dify_desensitization_enable
 
-        # 6. Handle Image settings
+        # 5. Handle Image settings
         if self.dify_image_upload_enable is not None:
             warn_dep("dify_image_upload_enable", "image_upload_enable")
             if not self.image_upload_enable:
@@ -352,7 +342,7 @@ class Config(BaseModel):
             if self.image_cache_dir == "image":
                 self.image_cache_dir = self.dify_image_cache_dir
 
-        # 7. Handle Group Chat settings
+        # 6. Handle Group Chat settings
         if self.dify_group_chat_history_limit is not None:
             warn_dep("dify_group_chat_history_limit", "group_chat_history_limit")
             if self.group_chat_history_limit == 10:
@@ -363,7 +353,7 @@ class Config(BaseModel):
             if self.group_chat_history_size == 1024:
                 self.group_chat_history_size = self.dify_group_chat_history_size
 
-        # 8. Handle Profiler settings
+        # 7. Handle Profiler settings
         if self.dify_profiler_workflow_api_key is not None:
             warn_dep("dify_profiler_workflow_api_key", "profiler_workflow_api_key")
             if self.profiler_workflow_api_key == "":
@@ -395,7 +385,7 @@ class Config(BaseModel):
             if self.default_personalization == default_text:
                 self.default_personalization = self.dify_default_personalization
 
-        # 9. Handle Private Chat settings
+        # 8. Handle Private Chat settings
         if self.dify_private_personalization_enable is not None:
             warn_dep("dify_private_personalization_enable", "private_personalization_enable")
             if not self.private_personalization_enable:
