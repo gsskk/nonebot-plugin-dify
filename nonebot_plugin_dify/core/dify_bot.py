@@ -141,10 +141,11 @@ class DifyBot:
             group_id = self._extract_group_id(full_user_id)
             user_id = self._extract_user_id(full_user_id)
 
-            # 只有当 IMAGE_UPLOAD_ENABLE=true 且 IMAGE_ATTACH_MODE != off 时才附加缓存图片
+            # 只有当 IMAGE_UPLOAD_ENABLE=true 且 IMAGE_ATTACH_MODE != off 且没有显式引用图片时才附加缓存图片
             if (
                 config.image_upload_enable
                 and config.image_attach_mode != "off"
+                and not replied_image_path  # Skip if user already replied to an image explicitly
                 and image_cache.should_attach_image(query)
             ):
                 cached_image_path = image_cache.get_cached_image(adapter_name, group_id, user_id)
