@@ -436,7 +436,13 @@ async def handle_message(bot: Bot, event: Event):
             is_targeted_at_others = mentions_others or is_reply_to_others
 
             # --- Priority 2: Linger Mode Check (Group Wide) ---
-            if not is_mentioned and not is_targeted_at_others and config.linger_mode_enable and group_state:
+            if (
+                not is_mentioned
+                and not is_targeted_at_others
+                and config.linger_mode_enable
+                and group_state
+                and not group_state.active_trace_id
+            ):
                 if group_state.last_interaction_time > 0:  # Only linger if we actually had a previous interaction
                     time_since_last = time.time() - group_state.last_interaction_time
                     if time_since_last < config.linger_timeout_seconds:
@@ -475,7 +481,6 @@ async def handle_message(bot: Bot, event: Event):
 
                 # 2. Update group state
                 if group_state:
-                    group_state.last_interaction_time = time.time()
                     if is_linger:
                         group_state.linger_message_count += 1
                     else:
@@ -622,6 +627,11 @@ async def handle_message(bot: Bot, event: Event):
                 at_user_ids.append(str(seg.target))
 
         # 获取回复并发送
+        trace_id = ""
+        if group_state:
+            trace_id = f"{id(event)}_{time.time()}"
+            group_state.active_trace_id = trace_id
+
         try:
             await send_reply_message(
                 msg_text,
@@ -637,11 +647,19 @@ async def handle_message(bot: Bot, event: Event):
                 at_user_ids=at_user_ids,
                 is_linger=is_linger,
             )
+
+            # Update last interaction time after successful reply to delay subsequent linger triggers
+            if group_state:
+                group_state.last_interaction_time = time.time()
+
         except FinishedException:
             raise
         except Exception as e:
             logger.warning(f"Failed to generate reply: {e}")
             await receive_message.finish("")
+        finally:
+            if group_state and group_state.active_trace_id == trace_id:
+                group_state.active_trace_id = ""
 
     except FinishedException:
         raise

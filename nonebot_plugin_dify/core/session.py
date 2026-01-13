@@ -31,6 +31,7 @@ class GroupState:
     proactive_last_trigger_time: float = 0.0
     proactive_pending_task_id: str = ""
     created_at: float = field(default_factory=time.time)
+    active_trace_id: str = ""
 
 
 # 2. 全局的、唯一的缓存实例
