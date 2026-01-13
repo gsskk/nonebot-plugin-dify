@@ -1,4 +1,4 @@
-from typing import Set, Optional
+from typing import Set, Optional, Dict, Any
 import warnings
 
 from nonebot import get_plugin_config
@@ -230,6 +230,51 @@ class Config(BaseModel):
     system_admin_user_id: Optional[str] = None
     """用于接收系统关键告警的管理员的“完整用户ID”，可以通过私聊机器人发送 /get_my_id 命令获取"""
 
+    # --- Tool System & OpenAI Configuration ---
+    tool_enable: bool = False
+    """是否启用 Tool 系统（及 OpenAI 兼容模式）。开启后 plugin 将作为 Tool Provider，并尝试从 tool_model_base_url 加载 LLM。"""
+
+    tool_allowlist: Set[str] = set()
+    """允许作为 Tool 暴露给 LLM 的命令名称列表，例如 {"weather", "help"}"""
+
+    tool_timeout: int = 30
+    """Tool 执行超时时间（秒），默认 30 秒"""
+
+    tool_sandbox_api_allowlist: Set[str] = {
+        "get_login_info",
+        "get_stranger_info",
+        "get_friend_list",
+        "get_group_info",
+        "get_group_member_info",
+        "get_group_member_list",
+        "get_group_honor_info",
+        "get_cookies",
+        "get_csrf_token",
+        "get_credentials",
+        "get_version_info",
+        "get_status",
+        "get_record",
+        "get_image",
+        "can_send_image",
+        "can_send_record",
+    }
+    """Tool 沙箱中允许调用的 API 列表（通常为只读 API）"""
+
+    tool_model_api_key: Optional[str] = None
+    """OpenAI 兼容模式的 API Key"""
+
+    tool_model_base_url: Optional[str] = None
+    """OpenAI 兼容模式的 Base URL"""
+
+    tool_model_name: Optional[str] = None
+    """OpenAI 兼容模式的模型名称，例如 'gpt-5' 或 'deepseek-chat'"""
+
+    tool_schema_override: Dict[str, Dict[str, Any]] = {}
+    """自定义工具 Schema 和命令格式。
+    格式：{"cmd_name": {"parameters": {...}, "format": "/cmd {arg}", "aliases": ["alias1", "alias2"]}}
+    - aliases: 添加额外的工具别名
+    """
+
     # --- Backward Compatibility Fields (Deprecated) ---
     dify_api_key: Optional[str] = None
     dify_app_type: Optional[str] = None
@@ -422,6 +467,30 @@ class Config(BaseModel):
             if self.private_data_retention_days == 90:
                 self.private_data_retention_days = self.dify_private_data_retention_days
 
+        return self
+
+    @model_validator(mode="after")
+    def _validate_tool_config(self) -> "Config":
+        """Validate Tool System configuration"""
+        if self.tool_enable:
+            # 1. Check Required OpenAI Configs
+            if not self.tool_model_api_key:
+                raise ValueError(
+                    "tool_model_api_key is required when tool_enable is True. Please set TOOL_MODEL_API_KEY in .env."
+                )
+            # 2. Check Tool Allowlist
+            if not self.tool_allowlist:
+                warnings.warn(
+                    "tool_enable is True but tool_allowlist is empty. No plugins will be exposed as tools.",
+                    UserWarning,
+                )
+        elif self.tool_allowlist:
+            # Tool Disabled but Allowlist present -> Warning
+            warnings.warn(
+                "tool_allowlist is configured but tool_enable is False. "
+                "Tool system is DISABLED. Set TOOL_ENABLE=true to enable.",
+                UserWarning,
+            )
         return self
 
 

@@ -140,11 +140,8 @@ async def send_reply_message(
                 logger.warning(f"Failed to record bot reply: {e}")
 
             # 发送消息
-            # 在调用 API 时注入内部标记，防止被自身的拦截器二次拦截
+            # 使用 UniMessage.send() 跨平台发送（兼容 QQ、Discord、Telegram 等）
             try:
-                # 统一使用 call_api 以支持注入自定义元数据 _dify_internal
-                local_params = {"_dify_internal": True}
-
                 # 判定是否需要艾特回去：只有在非私聊、非主动接管、非余韵模式下才艾特
                 # 且如果是流式输出，只在第一段艾特
                 should_at = not (target.private or is_proactive or is_linger) and not has_replied
@@ -154,19 +151,8 @@ async def send_reply_message(
                 else:
                     final_msg = _uni_message
 
-                # 为特定的 bot 导出消息格式
-                msg_export = await final_msg.export(bot, fallback=True)
-                local_params["message"] = msg_export
-
-                # 手动构造参数以兼容不同适配器（补充您之前的修正逻辑）
-                if target.private:
-                    local_params["message_type"] = "private"
-                    local_params["user_id"] = int(target.id) if target.id.isdigit() else target.id
-                else:
-                    local_params["message_type"] = "group"
-                    local_params["group_id"] = int(target.id) if target.id.isdigit() else target.id
-
-                await bot.call_api("send_msg", **local_params)
+                # 使用 UniMessage.send() 跨平台发送
+                await final_msg.send(target=target, bot=bot)
                 has_replied = True
             except Exception as e:
                 logger.error(f"[DIFY] Failed to send response: {e}")

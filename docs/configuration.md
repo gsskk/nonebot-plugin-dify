@@ -142,6 +142,53 @@
 |:-----:|:----:|:---:|:---|
 | SYSTEM_ADMIN_USER_ID | 否 | None | 系统管理员的“完整用户ID”，用于赋予指定用户全局管理员权限。<br />支持多个ID，用逗号分隔。<br />管理员可以无视平台角色限制，使用如 `/record` 和 `/profiler` 等命令。<br />私聊机器人发送 `/get_my_id` 可获取自己的ID。 |
 
+## 工具系统 (Plugin-as-a-Tool)
+
+将 NoneBot 插件的命令暴露为 Dify 智能体可调用的工具（Tools）。
+
+| 配置项 | 必填 | 默认值 | 说明 |
+|:-----:|:----:|:---:|:---|
+| TOOL_ENABLE | 否 | False | 是否启用工具系统。开启后，将根据 `TOOL_MODEL_*` 配置连接 OpenAI 兼容模型进行工具检测。此时 `DIFY_MAIN_APP_TYPE` 设置可能会被覆盖。 |
+| TOOL_ALLOWLIST | 否 | [] | 允许暴露给 LLM 的命令白名单 (JSON List)。例如 `["weather", "help"]`。 |
+| TOOL_TIMEOUT | 否 | 30 | 工具执行超时时间（秒）。 |
+| TOOL_SANDBOX_API_ALLOWLIST | 否 | [] | 沙箱环境中允许调用的只读 API (JSON List)。例如 `["get_group_info"]`。 |
+| TOOL_SCHEMA_OVERRIDE | 否 | {} | **高级配置**：自定义工具的 Schema、命令格式和别名 (JSON Dict)。<br />用于手动指定复杂参数或为工具起别名。<br />格式详见下文示例。 |
+
+### OpenAI 兼容模型配置 (工具检测用)
+
+当启用工具系统 (`TOOL_ENABLE=True`) 时，必须配置以下 OpenAI 兼容模型信息，用于第一阶段的工具意图检测。
+
+| 配置项 | 必填 | 默认值 | 说明 |
+|:-----:|:----:|:---:|:---|
+| TOOL_MODEL_API_KEY | **是** | | OpenAI 兼容模型的 API Key |
+| TOOL_MODEL_BASE_URL | 否 | | OpenAI 兼容模型的 Base URL (如 `https://api.deepseek.com`) |
+| TOOL_MODEL_NAME | 否 | | 模型名称 (如 `deepseek-chat`) |
+
+### TOOL_SCHEMA_OVERRIDE 示例
+
+用于自定义工具参数、命令格式和别名。
+
+```json
+{
+  "weather": {
+    "aliases": ["天气", "yb"], 
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "city": { "type": "string", "description": "City name" },
+        "days": { "type": "integer", "description": "Forecast days", "default": 3 }
+      },
+      "required": ["city"]
+    },
+    "format": "/weather {city} --days {days}"
+  }
+}
+```
+
+- **aliases**: 为工具添加别名（如 `天气`）。所有别名都会指向原始命令 `weather`。
+- **parameters**: 覆盖自动生成的 JSON Schema。
+- **format**: 定义如何将工具调用参数转换为 NoneBot 命令字符串。
+
 ## 配置迁移指南
 
 > **重要更新**: 为了提供更清晰的配置体验，我们重新设计了配置变量的命名。旧的配置变量仍然支持，但会显示弃用警告。

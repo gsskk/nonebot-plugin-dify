@@ -1,20 +1,16 @@
-import json
 import mimetypes
 import os
-import re
-import asyncio
 from typing import List, Optional, Tuple, AsyncGenerator
 
 
-import httpx
 from nonebot import logger
 import nonebot_plugin_alconna as alconna
 
 from . import session as session_manager
 from ..config import config
-from .dify_client import DifyClient, ChatClient
-from ..utils.helpers import parse_markdown_text
+from .dify_client import DifyClient
 from ..utils.reply_type import ReplyType
+from ..tools.driver import get_driver
 from ..storage import chat_recorder, record_manager
 from ..managers import group_memory
 from ..storage.group_store import group_profile_memory, personalization_memory, group_user_memory
@@ -22,7 +18,6 @@ from .cache import USER_IMAGE_CACHE
 from ..storage import private_recorder as private_chat_recorder
 from ..storage.user_store import user_profile_memory, user_personalization_memory
 from ..utils import image_cache
-from ..utils.streaming import StreamingBuffer
 
 
 class DifyBot:
@@ -107,7 +102,6 @@ class DifyBot:
     ) -> AsyncGenerator[Tuple[List[ReplyType], List[str]], None]:
         try:
             session_manager.count_user_message(session)  # 限制一个conversation中消息数
-            dify_app_type = config.dify_main_app_type
 
             all_files = []
             # 1. 处理当前消息的图片
@@ -186,31 +180,55 @@ class DifyBot:
                 proactive_user_hint=proactive_user_hint,
             )
 
-            if dify_app_type in ("chatbot", "chatflow"):
-                async for res in self._handle_chatbot(
-                    final_query,
-                    session,
-                    conversation_id,
-                    full_user_id.split("+")[-1],
-                    full_user_id.split("+")[0],
-                    files=all_files,
-                ):
-                    yield res
-            elif dify_app_type == "agent":
-                async for res in self._handle_agent(
-                    final_query, session, conversation_id, full_user_id.split("+")[-1], full_user_id.split("+")[0]
-                ):
-                    yield res
-            elif dify_app_type == "workflow":
-                # Workflow currently blocking only (as per original logic, though API supports streaming)
-                # We wrap it in generator for consistency
-                res = await self._handle_workflow(
-                    final_query, session, full_user_id.split("+")[-1], full_user_id.split("+")[0]
-                )
-                yield res
-            else:
-                logger.error(f"Invalid dify_main_app_type configuration: {dify_app_type}")
-                yield [ReplyType.TEXT], ["配置错误：dify_main_app_type 必须是 agent、chatbot/chatflow 或 workflow"]
+            dify_api_user = full_user_id.split("+")[-1]
+            driver = get_driver()
+
+            async for replies_type, replies_content, meta in driver.chat(
+                query=final_query,
+                user_id=full_user_id,
+                conversation_id=conversation_id,
+                files=all_files,
+                extra_context=dify_api_user,
+            ):
+                # Handle conversation_id from metadata
+                if meta.get("conversation_id"):
+                    cid = meta["conversation_id"]
+                    if cid and not session.conversation_id:
+                        session.conversation_id = cid
+
+                # Handle tool execution result - record to chat history (uses perceived_result format)
+                if meta.get("perceived_result"):
+                    try:
+                        perceived_result_text = meta["perceived_result"]
+                        # Record perceived result as assistant message in history
+                        if group_id:
+                            await chat_recorder.record_message(
+                                adapter_name,
+                                group_id,
+                                "tool_system",
+                                "工具系统",
+                                perceived_result_text,
+                                "assistant",
+                                is_mentioned=False,
+                                skip_repeat_check=True,
+                            )
+                        else:
+                            # Private chat
+                            from ..storage import private_recorder as private_chat_recorder
+
+                            await private_chat_recorder.record_private_message(
+                                adapter_name,
+                                user_id,
+                                "工具系统",
+                                perceived_result_text,
+                                "assistant",
+                                skip_repeat_check=True,
+                            )
+                        logger.debug("[DIFY] Recorded perceived result to chat history")
+                    except Exception as e:
+                        logger.warning(f"Failed to record perceived result to history: {e}")
+
+                yield replies_type, replies_content
 
         except Exception as e:
             logger.error(f"Internal reply error: {e}")
@@ -437,332 +455,6 @@ class DifyBot:
             logger.error(f"Failed to build private chat query: {e}")
             return f"User: {query}", conversation_id
 
-    async def _handle_chatbot(
-        self,
-        query: str,
-        session: session_manager.Session,
-        conversation_id: str,
-        user_id: str = None,
-        adapter_name: str = None,
-        files: list = None,
-    ):
-        try:
-            chat_client = ChatClient(config.dify_main_app_api_key, config.dify_api_base)
-
-            # Check if streaming is enabled
-            if config.dify_stream_enable:
-                # Re-use agent handler logic for streaming chatbot responses if API is compatible
-                # Chatbot API is very similar to Agent API (POST /chat-messages)
-                # so we can share the streaming logic mostly.
-                # Let's delegate to a unified streaming handler or adapt _handle_chatbot to support stream.
-
-                # NOTE: ChatClient.create_chat_message supports response_mode="streaming"
-                # We need to manually handle the request here to use httpx.stream,
-                # OR update ChatClient to expose stream (which it does via _send_request(stream=True)).
-
-                # Ideally, we refactor to use a shared streaming method.
-                async for res in self._handle_streaming_request(
-                    f"{config.dify_api_base}/chat-messages",
-                    {
-                        "inputs": {},
-                        "query": query,
-                        "response_mode": "streaming",
-                        "conversation_id": conversation_id,
-                        "user": session.user,
-                        "files": files,
-                    },
-                    session,
-                ):
-                    yield res
-                return
-
-            # Non-streaming fallback (Original Logic)
-            response = await chat_client.create_chat_message(
-                inputs={},
-                query=query,
-                user=session.user,
-                response_mode="blocking",
-                conversation_id=conversation_id,
-                files=files,
-            )
-
-            if response.status_code != 200:
-                error_message = f"请求 Dify 服务时出错 (HTTP {response.status_code})。"
-                try:
-                    error_data = response.json()
-                    detail = error_data.get("message", response.text[:200])
-                    error_message += f" 详细信息: {detail}"
-                except json.JSONDecodeError:
-                    error_message += f" 无法解析错误响应: {response.text[:200]}"
-                logger.error(f"Dify API error: status_code={response.status_code}, response={response.text[:200]}")
-                yield [ReplyType.TEXT], [error_message]
-                return
-
-            try:
-                rsp_data = response.json()
-                logger.debug(f"[DIFY] usage {rsp_data.get('metadata', {}).get('usage', 0)}")
-
-                answer = rsp_data.get("answer", "")
-                if not answer:
-                    logger.warning("Dify returned empty answer")
-                    yield [], []
-                    return
-
-                answer = self._clean_content(answer)
-                parsed_content = parse_markdown_text(answer)
-                replies_type, replies_context = self._parse_replies(parsed_content)
-
-                if conversation_id is not None and not session.conversation_id:
-                    session.conversation_id = rsp_data.get("conversation_id", "")
-
-                yield replies_type, replies_context
-
-            except (json.JSONDecodeError, KeyError) as e:
-                logger.error(f"Failed to parse Dify response: {e}")
-                yield [ReplyType.TEXT], ["解析 Dify 返回数据时出错，请检查 Dify 应用配置。"]
-
-        except httpx.TimeoutException as e:
-            logger.error(f"Dify chatbot API timeout: {e}")
-            yield [ReplyType.TEXT], ["请求 Dify 服务超时，请稍后再试。"]
-
-        except httpx.RequestError as e:
-            logger.error(f"Dify chatbot request error: {e}")
-            yield [ReplyType.TEXT], ["请求 Dify 服务失败，请检查网络连接或 API 地址。"]
-
-        except Exception as e:
-            logger.error(f"Unexpected error in chatbot handler: {e}")
-            yield [ReplyType.TEXT], ["处理回复时遇到未知错误。"]
-
-    async def _handle_agent(
-        self,
-        query: str,
-        session: session_manager.Session,
-        conversation_id: str,
-        user_id: str = None,
-        adapter_name: str = None,
-    ):
-        try:
-            payload = {
-                "inputs": {},
-                "query": query,
-                "response_mode": "streaming",
-                "conversation_id": conversation_id,
-                "user": session.user,
-            }
-
-            if config.dify_stream_enable:
-                async for res in self._handle_streaming_request(
-                    f"{config.dify_api_base}/chat-messages", payload, session
-                ):
-                    yield res
-                return
-
-            # Legacy "False Streaming" (Wait for full SSE)
-            async with httpx.AsyncClient(timeout=httpx.Timeout(config.dify_api_timeout)) as client:
-                response = await client.post(
-                    f"{config.dify_api_base}/chat-messages",
-                    headers=self._get_headers(),
-                    json=payload,
-                )
-
-            if response.status_code != 200:
-                error_message = f"请求 Dify-Agent 服务时出错 (HTTP {response.status_code})。"
-                try:
-                    error_data = response.json()
-                    detail = error_data.get("message", response.text[:200])
-                    error_message += f" 详细信息: {detail}"
-                except json.JSONDecodeError:
-                    error_message += f" 无法解析错误响应: {response.text[:200]}"
-                logger.error(
-                    f"Dify agent API error: status_code={response.status_code}, response={response.text[:200]}"
-                )
-                yield [ReplyType.TEXT], [error_message]
-                return
-
-            try:
-                msgs, new_conv_id = self._handle_sse_response(response)
-                replies_type, replies_context = self._parse_agent_replies(msgs)
-
-                if conversation_id is not None and not session.conversation_id:
-                    session.conversation_id = new_conv_id
-
-                yield replies_type, replies_context
-
-            except Exception as e:
-                logger.error(f"Failed to parse agent response: {e}")
-                yield [ReplyType.TEXT], ["解析 Dify-Agent 返回数据时出错，请检查 Dify 应用配置。"]
-
-        except httpx.TimeoutException as e:
-            logger.error(f"Dify agent API timeout: {e}")
-            yield [ReplyType.TEXT], ["请求 Dify-Agent 服务超时，请稍后再试。"]
-
-        except httpx.RequestError as e:
-            logger.error(f"Dify agent request error: {e}")
-            yield [ReplyType.TEXT], ["请求 Dify-Agent 服务失败，请检查网络连接或 API 地址。"]
-
-        except Exception as e:
-            logger.error(f"Unexpected error in agent handler: {e}")
-            yield [ReplyType.TEXT], ["处理 Dify-Agent 回复时遇到未知错误。"]
-
-    async def _handle_streaming_request(self, url: str, payload: dict, session: session_manager.Session):
-        """Unified streaming handler for Agent and Chatbot"""
-        streaming_buffer = StreamingBuffer(min_char=config.dify_stream_min_char)
-        last_yield_time = 0
-
-        try:
-            async with httpx.AsyncClient(timeout=httpx.Timeout(config.dify_api_timeout)) as client:
-                async with client.stream(
-                    "POST",
-                    url,
-                    headers=self._get_headers(),
-                    json=payload,
-                ) as response:
-                    if response.status_code != 200:
-                        yield [ReplyType.TEXT], [f"Stream Error: {response.status_code}"]
-                        return
-
-                    async for line in response.aiter_lines():
-                        if not line or not line.startswith("data:"):
-                            continue
-
-                        try:
-                            data = json.loads(line[5:])
-                            event = data.get("event")
-
-                            if event in ("agent_message", "message"):
-                                answer = data.get("answer", "")
-                                if not answer:
-                                    continue
-
-                                # Update conversation ID if not present
-                                if not session.conversation_id and data.get("conversation_id"):
-                                    session.conversation_id = data.get("conversation_id")
-
-                                # Process buffer
-                                for segment in streaming_buffer.process(answer):
-                                    # Flow control
-                                    now = asyncio.get_event_loop().time()
-                                    if now - last_yield_time < config.dify_stream_min_interval:
-                                        await asyncio.sleep(config.dify_stream_min_interval - (now - last_yield_time))
-
-                                    yield [ReplyType.TEXT], [segment]
-                                    last_yield_time = asyncio.get_event_loop().time()
-
-                            elif event == "message_file":
-                                # Immediately yield images
-                                url = self._fill_file_base_url(data.get("url"))
-                                yield [ReplyType.IMAGE_URL], [url]
-
-                            elif event == "error":
-                                logger.error(f"Stream error event: {data}")
-                                yield [ReplyType.TEXT], [f"Error: {data.get('message', 'Unknown error')}"]
-
-                            elif event == "message_end":
-                                break
-
-                        except json.JSONDecodeError:
-                            continue
-
-                    # Flush remaining buffer
-                    for segment in streaming_buffer.flush():
-                        yield [ReplyType.TEXT], [segment]
-
-        except Exception as e:
-            logger.error(f"Streaming request failed: {e}")
-            yield [ReplyType.TEXT], [f"Streaming Interrupted: {e}"]
-
-    async def _handle_workflow(
-        self, query: str, session: session_manager.Session, user_id: str = None, adapter_name: str = None
-    ):
-        try:
-            payload = {"inputs": {"query": query}, "response_mode": "blocking", "user": session.user}
-
-            async with httpx.AsyncClient(timeout=httpx.Timeout(config.dify_api_timeout)) as client:
-                response = await client.post(
-                    f"{config.dify_api_base}/workflows/run",
-                    headers=self._get_headers(),
-                    json=payload,
-                )
-
-            if response.status_code != 200:
-                error_message = f"请求 Dify-Workflow 服务时出错 (HTTP {response.status_code})。"
-                try:
-                    error_data = response.json()
-                    detail = error_data.get("message", response.text[:200])
-                    error_message += f" 详细信息: {detail}"
-                except json.JSONDecodeError:
-                    error_message += f" 无法解析错误响应: {response.text[:200]}"
-                logger.error(
-                    f"Dify workflow API error: status_code={response.status_code}, response={response.text[:200]}"
-                )
-                return [ReplyType.TEXT], [error_message]
-
-            try:
-                rsp_data = response.json()
-                reply_content = rsp_data.get("data", {}).get("outputs", {}).get("text", "")
-
-                if not reply_content:
-                    logger.warning("Dify workflow returned empty response")
-                    return [], []
-
-                reply_content = self._clean_content(reply_content)
-                return [ReplyType.TEXT], [reply_content]
-
-            except (json.JSONDecodeError, KeyError) as e:
-                logger.error(f"Failed to parse workflow response: {e}")
-                return [ReplyType.TEXT], ["解析 Dify-Workflow 返回数据时出错，请检查 Dify 应用配置。"]
-
-        except httpx.TimeoutException as e:
-            logger.error(f"Dify workflow API timeout: {e}")
-            return [ReplyType.TEXT], ["请求 Dify-Workflow 服务超时，请稍后再试。"]
-
-        except httpx.RequestError as e:
-            logger.error(f"Dify workflow request error: {e}")
-            return [ReplyType.TEXT], ["请求 Dify-Workflow 服务失败，请检查网络连接或 API 地址。"]
-
-        except Exception as e:
-            logger.error(f"Unexpected error in workflow handler: {e}")
-            return [ReplyType.TEXT], ["处理 Dify-Workflow 回复时遇到未知错误。"]
-
-    def _parse_replies(self, parsed_content: list) -> Tuple[list, list]:
-        replies_type = []
-        replies_context = []
-        for item in parsed_content:
-            type_map = {"image": ReplyType.IMAGE_URL, "file": ReplyType.FILE, "text": ReplyType.TEXT}
-            content_map = {
-                "image": self._fill_file_base_url(item["content"]),
-                "file": self._fill_file_base_url(item["content"]),
-                "text": item["content"],
-            }
-            item_type = item.get("type", "text")
-            replies_type.append(type_map.get(item_type, ReplyType.TEXT))
-            replies_context.append(content_map.get(item_type, item["content"]))
-        return replies_type, replies_context
-
-    def _parse_agent_replies(self, msgs: list) -> Tuple[list, list]:
-        replies_type = []
-        replies_context = []
-        for msg in msgs:
-            if msg["type"] == "agent_message":
-                replies_type.append(ReplyType.TEXT)
-                replies_context.append(msg["content"])
-            elif msg["type"] == "message_file":
-                replies_type.append(ReplyType.IMAGE_URL)
-                replies_context.append(msg["content"]["url"])
-        return replies_type, replies_context
-
-    def _clean_content(self, content: str) -> str:
-        """
-        Clean the content returned by Dify.
-        Specifically removes <think>...</think> blocks that might be returned by reasoning models.
-        """
-        if not content:
-            return ""
-        # 移除 <think> 标签及其内容。虽然 reasoning model 通常将其放在开头（前缀），
-        # 但全局替换更安全，防止异常情况泄露思维链。
-        # 使用 strip() 去除可能残留的首尾空白字符。
-        return re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
-
     def _extract_adapter_name(self, full_user_id: str) -> str:
         return full_user_id.split("+")[0] if full_user_id else "unknown"
 
@@ -775,9 +467,6 @@ class DifyBot:
 
     def _extract_user_id(self, full_user_id: str) -> str:
         return full_user_id.split("+")[-1] if full_user_id else "user"
-
-    def _get_headers(self):
-        return {"Authorization": f"Bearer {config.dify_main_app_api_key}"}
 
     async def _get_upload_files(self, session: session_manager.Session):
         session_id = session.id
@@ -812,54 +501,6 @@ class DifyBot:
         except Exception as e:
             logger.error(f"Failed to upload file {path}: {e}")
             return None
-
-    def _fill_file_base_url(self, url: str):
-        if url.startswith(("http://", "https://")):
-            return url
-        return f"{config.dify_api_base.replace('/v1', '')}{url}"
-
-    def _handle_sse_response(self, response: httpx.Response):
-        events = [self._parse_sse_event(line) for line in response.iter_lines() if line]
-        events = [e for e in events if e]
-
-        merged_message = []
-        accumulated_agent_message = ""
-        conversation_id = None
-        for event in events:
-            event_name = event["event"]
-            if event_name in ("agent_message", "message"):
-                accumulated_agent_message += event["answer"]
-                conversation_id = conversation_id or event["conversation_id"]
-            elif event_name == "message_file":
-                self._append_agent_message(accumulated_agent_message, merged_message)
-                accumulated_agent_message = ""
-                merged_message.append({"type": "message_file", "content": event})
-            elif event_name == "message_end":
-                self._append_agent_message(accumulated_agent_message, merged_message)
-                break
-            elif event_name == "error":
-                logger.error(f"[DIFY] error: {event}")
-                raise Exception(str(event))
-
-        if not conversation_id:
-            raise Exception("conversation_id not found in SSE response")
-
-        return merged_message, conversation_id
-
-    def _append_agent_message(self, accumulated_agent_message, merged_message):
-        if accumulated_agent_message:
-            cleaned_message = self._clean_content(accumulated_agent_message)
-            if cleaned_message:
-                merged_message.append({"type": "agent_message", "content": cleaned_message})
-
-    def _parse_sse_event(self, line: str):
-        try:
-            decoded_line = line
-            if decoded_line.startswith("data:"):
-                return json.loads(decoded_line[5:])
-        except (json.JSONDecodeError, UnicodeDecodeError):
-            return None
-        return None
 
 
 dify_bot: DifyBot = DifyBot()
