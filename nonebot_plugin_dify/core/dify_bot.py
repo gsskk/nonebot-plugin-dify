@@ -36,6 +36,7 @@ class DifyBot:
         is_linger: bool = False,
         is_proactive: bool = False,
         proactive_user_hint: str = None,
+        is_perception: bool = False,
     ) -> AsyncGenerator[Tuple[List[ReplyType], List[str]], None]:
         logger.info(f"[DIFY] query={query.strip()}")
         logger.debug(f"[DIFY] dify_user={full_user_id}")
@@ -62,6 +63,7 @@ class DifyBot:
                     is_linger=is_linger,
                     is_proactive=is_proactive,
                     proactive_user_hint=proactive_user_hint,
+                    is_perception=is_perception,
                 ):
                     if not _reply_type_list:
                         continue
@@ -99,6 +101,7 @@ class DifyBot:
         is_linger: bool = False,
         is_proactive: bool = False,
         proactive_user_hint: str = None,
+        is_perception: bool = False,
     ) -> AsyncGenerator[Tuple[List[ReplyType], List[str]], None]:
         try:
             session_manager.count_user_message(session)  # 限制一个conversation中消息数
@@ -189,6 +192,7 @@ class DifyBot:
                 conversation_id=conversation_id,
                 files=all_files,
                 extra_context=dify_api_user,
+                disable_tools=is_perception,
             ):
                 # Handle conversation_id from metadata
                 if meta.get("conversation_id"):

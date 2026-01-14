@@ -20,6 +20,12 @@ from ..services.image_description import generate_image_description
 from ..utils.helpers import get_full_user_id, get_adapter_name, save_pic
 from .message import send_reply_message
 
+# Context variable to track if we're currently sending a perception response
+# This prevents self-interception loops
+from contextvars import ContextVar
+
+_perception_responding: ContextVar[bool] = ContextVar("perception_responding", default=False)
+
 
 @Bot.on_calling_api
 async def handle_perception(bot: Bot, api: str, data: Dict[str, Any]):
@@ -29,6 +35,10 @@ async def handle_perception(bot: Bot, api: str, data: Dict[str, Any]):
 
     # 0. 排除 Dify 自身的内部调用 (防止自我拦截导致的死循环)
     if data.get("_dify_internal"):
+        return
+
+    # 0.5 排除正在发送感知响应的情况 (防止自我循环)
+    if _perception_responding.get():
         return
 
     # 1. 识别来源插件
@@ -354,30 +364,37 @@ async def handle_perception(bot: Bot, api: str, data: Dict[str, Any]):
                 except Exception as e:
                     logger.warning(f"Failed to extract original user message content: {e}")
 
-                asyncio.create_task(
-                    send_reply_message(
-                        final_query,
-                        full_user_id,
-                        session_id,
-                        event,
-                        bot,
-                        target,
-                        adapter_name,
-                        personalization_enabled=get_private_personalization_status(
-                            adapter_name, getattr(event, "user_id", "user")
+                async def _send_perception_response():
+                    """Wrapper to set context variable before sending perception response"""
+                    _perception_responding.set(True)
+                    try:
+                        await send_reply_message(
+                            final_query,
+                            full_user_id,
+                            session_id,
+                            event,
+                            bot,
+                            target,
+                            adapter_name,
+                            personalization_enabled=get_private_personalization_status(
+                                adapter_name, getattr(event, "user_id", "user")
+                            )
+                            if target.private and config.private_personalization_enable
+                            else False,
+                            is_proactive=True,
+                            proactive_user_hint=(
+                                f"User sent an image and said: {user_msg_text}"
+                                if user_has_image and user_msg_text.strip()
+                                else f"User sent: {user_msg_text}"
+                                if user_msg_text.strip()
+                                else "User sent an image."
+                            ),
+                            is_perception=True,
                         )
-                        if target.private and config.private_personalization_enable
-                        else False,
-                        is_proactive=True,
-                        proactive_user_hint=(
-                            f"User sent an image and said: {user_msg_text}"
-                            if user_has_image and user_msg_text.strip()
-                            else f"User sent: {user_msg_text}"
-                            if user_msg_text.strip()
-                            else "User sent an image."
-                        ),
-                    )
-                )
+                    finally:
+                        _perception_responding.set(False)
+
+                asyncio.create_task(_send_perception_response())
                 # 8.2 (新) 媒体透传：如果包含非文本内容（图片等），先主动发送给用户
                 # 这样可以避免拦截后图片丢失，实现“图片直通，文字接管”
                 try:

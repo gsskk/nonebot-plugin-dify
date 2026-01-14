@@ -74,6 +74,7 @@ async def send_reply_message(
     is_linger: bool = False,
     is_proactive: bool = False,
     proactive_user_hint: str = None,
+    is_perception: bool = False,
 ) -> None:
     """发送回复消息"""
     user_id = event.get_user_id() or "user"
@@ -93,6 +94,7 @@ async def send_reply_message(
             is_linger=is_linger,
             is_proactive=is_proactive,
             proactive_user_hint=proactive_user_hint,
+            is_perception=is_perception,
         ):
             # 检查是否为静默回复（Linger Mode 或 Proactive Mode）
             if not reply_type and not reply_content:

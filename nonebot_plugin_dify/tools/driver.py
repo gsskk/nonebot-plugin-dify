@@ -22,6 +22,7 @@ class LLMDriver(ABC):
         conversation_id: str,
         files: Optional[list] = None,
         extra_context: Optional[str] = None,  # For passing session.user (full identifier)
+        disable_tools: bool = False,  # Disable tool detection for proactive/perception
     ) -> AsyncGenerator[Tuple[List[ReplyType], List[str], Dict[str, Any]], None]:
         """
         Chat with the backend.
@@ -52,6 +53,7 @@ class DifyAppDriver(LLMDriver):
         conversation_id: str,
         files: Optional[list] = None,
         extra_context: Optional[str] = None,  # Dify API requires 'user' field
+        disable_tools: bool = False,  # Not used by DifyAppDriver
     ) -> AsyncGenerator[Tuple[List[ReplyType], List[str], Dict[str, Any]], None]:
         dify_user = extra_context or user_id
         dify_app_type = config.dify_main_app_type
@@ -436,7 +438,7 @@ class ToolAugmentedDifyDriver(LLMDriver):
         messages = [
             {
                 "role": "system",
-                "content": "You are a helpful assistant. Use the provided tools if necessary to answer the user's question. If no tool is needed, respond with empty content.",
+                "content": "You are a helpful assistant. Use the provided tools if necessary to answer the user's question. When extracting parameters for search tools, use only the most critical keywords (2-4 words per query). Be concise. If no tool is needed, respond with empty content.",
             },
             {"role": "user", "content": query},
         ]
@@ -516,14 +518,19 @@ class ToolAugmentedDifyDriver(LLMDriver):
         conversation_id: str,
         files: Optional[list] = None,
         extra_context: Optional[str] = None,
+        disable_tools: bool = False,
     ) -> AsyncGenerator[Tuple[List[ReplyType], List[str], Dict[str, Any]], None]:
         """
         Two-stage flow:
         1. Detect and execute tools via OpenAI
         2. Pass augmented query to Dify for personalized response
         """
-        # Stage 1: Tool detection and execution
-        tool_result = await self._detect_and_execute_tools(query, user_id)
+        # Stage 1: Tool detection and execution (skip if disabled)
+        if disable_tools:
+            logger.debug("[ToolAugmented] Tools disabled for this request (proactive/perception mode)")
+            tool_result = None
+        else:
+            tool_result = await self._detect_and_execute_tools(query, user_id)
 
         # Stage 2: Build final query for Dify
         if tool_result:
@@ -603,6 +610,7 @@ class OpenAIDriver(LLMDriver):
         conversation_id: str,
         files: Optional[list] = None,
         extra_context: Optional[str] = None,
+        disable_tools: bool = False,
     ) -> AsyncGenerator[Tuple[List[ReplyType], List[str]], None]:
         # Lazy import dependencies to avoid circular imports during module load
         from .registry import get_tool_definitions
