@@ -17,7 +17,7 @@ from ..storage.group_store import group_profile_memory, personalization_memory, 
 from .cache import USER_IMAGE_CACHE
 from ..storage import private_recorder as private_chat_recorder
 from ..storage.user_store import user_profile_memory, user_personalization_memory
-from ..utils import image_cache
+from ..utils import image_cache, prompt_utils
 
 
 class DifyBot:
@@ -338,19 +338,30 @@ class DifyBot:
                         filtered_messages.pop(i)  # 删除倒数第一个匹配的消息
                         break
 
-                history_lines = []
-                for m in filtered_messages:
-                    line = f"{m.get('nickname', 'user')}({m.get('user_id')}): "
-                    # Handle image markers based on history_image_mode
-                    if m.get("has_image") and config.history_image_mode != "none":
-                        if config.history_image_mode == "description" and m.get("image_description"):
-                            line += f"[image: {m.get('image_description')}] "
-                        else:
-                            line += "[image] "
-                    line += m.get("message", "")
-                    history_lines.append(line)
-                content = chat_recorder.limit_chat_history_length(history_lines, config.group_chat_history_size)
-                history_str = f"<history>\n{content}\n</history>\n"
+                history_str = prompt_utils.format_history(
+                    filtered_messages, config.group_chat_history_size, image_mode=config.history_image_mode
+                )
+
+        # --- Construct Context Block using XML ---
+        context_parts = []
+        if group_profile_str:
+            context_parts.append(group_profile_str.strip())  # group_profile_str already contains tags if not empty?
+            # Wait, existing code: group_profile_str = f"<group_profile>\n{group_profile}\n</group_profile>\n"
+            # It already has tags.
+
+        if sender_persona_str:
+            context_parts.append(sender_persona_str.strip())
+
+        if personalization_str:
+            context_parts.append(personalization_str.strip())
+
+        if history_str:
+            context_parts.append(f"<history>\n{history_str}\n</history>")
+
+        context_block = ""
+        if context_parts:
+            joined_context = "\n".join(context_parts)
+            context_block = f"<context>\n{joined_context}\n</context>\n"
 
         # --- 注入主动介入提示 ---
         proactive_hint = ""
@@ -373,17 +384,17 @@ class DifyBot:
             # 'query' here is expected to be the <perceived_result> XML block from __init__.py
             perceived_context = query
 
-            final_query = f"{proactive_hint}{group_profile_str}{sender_persona_str}{personalization_str}{history_str}{replied_message_str}{perceived_context}<user_query>\n[System Event: {proactive_user_hint}]\n</user_query>"
+            final_query = f"{proactive_hint}{context_block}{replied_message_str}{perceived_context}<user_query>\n[System Event: {proactive_user_hint}]\n</user_query>"
 
             logger.debug(f"[DIFY] Proactive Context Constructed: Hint='{proactive_user_hint}'")
         else:
             # Standard Mode
             current_query = f"{user_id}: {query}"
-            final_query = f"{proactive_hint}{group_profile_str}{sender_persona_str}{personalization_str}{history_str}{replied_message_str}<user_query>\n{current_query}\n</user_query>"
+            final_query = (
+                f"{proactive_hint}{context_block}{replied_message_str}<user_query>\n{current_query}\n</user_query>"
+            )
 
-        logger.debug(
-            f"[DIFY] 已拼接上下文到查询 (含发送者画像: {bool(sender_persona_str)}, 含群画像: {bool(group_profile_str)}, 主动介入: {is_proactive})"
-        )
+        logger.debug("[DIFY] 已拼接上下文到查询 (使用prompt_utils)")
         return final_query, conversation_id
 
     async def _build_private_chat_query(
@@ -433,25 +444,40 @@ class DifyBot:
                                 filtered_messages.append(msg)
 
                         if filtered_messages:
-                            content = private_chat_recorder.limit_private_chat_history_length(
-                                filtered_messages, config.private_chat_history_size
+                            history_str = prompt_utils.format_history(
+                                filtered_messages,
+                                config.private_chat_history_size,
+                                image_mode=config.history_image_mode,
                             )
-                            history_str = f"<history>\n{content}\n</history>\n"
                 except Exception as e:
                     logger.warning(f"Failed to load private chat history: {e}")
 
             # --- 组合最终查询 ---
+            context_parts = []
+
+            if sender_persona_str:
+                context_parts.append(sender_persona_str)
+            if personalization_str:
+                context_parts.append(personalization_str)
+            if history_str:
+                # Wrap history in <history> tag if not already done by prompt_utils?
+                # prompt_utils returns just the lines.
+                context_parts.append(f"<history>\n{history_str}\n</history>")
+
+            context_block = ""
+            if context_parts:
+                joined_context = "\n".join(context_parts)
+                context_block = f"<context>\n{joined_context}\n</context>\n"
+
             if is_proactive and proactive_user_hint:
                 # Proactive Mode for Private Chat
                 perceived_context = query
-                final_query = f"{sender_persona_str}{personalization_str}{history_str}{perceived_context}<user_query>\n[System Event: {proactive_user_hint}]\n</user_query>"
+                final_query = f"{context_block}{perceived_context}<user_query>\n[System Event: {proactive_user_hint}]\n</user_query>"
             else:
                 current_query = f"User: {query}"
-                final_query = f"{sender_persona_str}{personalization_str}{history_str}<user_query>\n{current_query}\n</user_query>"
+                final_query = f"{context_block}<user_query>\n{current_query}\n</user_query>"
 
-            logger.debug(
-                f"[DIFY] 已拼接私聊上下文到查询 (含画像: {bool(sender_persona_str or personalization_str)}, 含历史: {bool(history_str)})"
-            )
+            logger.debug("[DIFY] 已拼接私聊上下文到查询 (使用了prompt_utils)")
 
             return final_query, conversation_id
 
