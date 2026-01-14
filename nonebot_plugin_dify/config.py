@@ -271,8 +271,7 @@ class Config(BaseModel):
 
     tool_schema_override: Dict[str, Dict[str, Any]] = {}
     """自定义工具 Schema 和命令格式。
-    格式：{"cmd_name": {"parameters": {...}, "format": "/cmd {arg}", "aliases": ["alias1", "alias2"]}}
-    - aliases: 添加额外的工具别名
+    格式：{"cmd_name": {"parameters": {...}, "format": "/cmd {arg}", "description": "..."}}
     """
 
     # --- Backward Compatibility Fields (Deprecated) ---

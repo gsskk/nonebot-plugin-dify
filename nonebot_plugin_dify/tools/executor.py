@@ -176,9 +176,16 @@ class VirtualEvent(_EventBase):
 
         real_message = MsgClass(message_str)
 
+        import random
+
+        # Generate a random message_id to prevent Alconna/NoneBot from caching parsed commands
+        # causing subsequent tools to see old arguments.
+        # Range 10000-99999999 to avoid conflicting with real message IDs if possible.
+        random_msg_id = random.randint(10000, 99999999)
+
         # Telegram
         if "nonebot.adapters.telegram" in mro_str:
-            data.setdefault("message_id", 1)
+            data.setdefault("message_id", random_msg_id)
             data.setdefault("date", 0)
             data.setdefault("chat", {"id": 1, "type": "private"})
             # Telegram uses original_message usually
@@ -190,7 +197,7 @@ class VirtualEvent(_EventBase):
 
         # OneBot V11
         if "nonebot.adapters.onebot.v11" in mro_str:
-            data.setdefault("message_id", 1)
+            data.setdefault("message_id", random_msg_id)
             data.setdefault("time", 0)
             data.setdefault("post_type", "message")
             data.setdefault("message_type", "private")
@@ -269,6 +276,18 @@ async def execute_tool(
     logger.debug(f"[Tool Executor] Starting execution of tool: {tool_name}")
     logger.debug(f"[Tool Executor] Tool arguments: {tool_args}")
 
+    # Fallback: Normalize common parameter mismatches (LLM hallucinations)
+    # e.g. queries -> query
+    if "queries" in tool_args and "query" not in tool_args:
+        logger.debug("[Tool Executor] Applied fallback: queries -> query")
+        tool_args["query"] = tool_args.pop("queries")
+
+    # Handle list arguments (e.g. query=['a', 'b']) -> join with spaces
+    for key, value in tool_args.items():
+        if isinstance(value, list):
+            tool_args[key] = " ".join(str(v) for v in value)
+            logger.debug(f"[Tool Executor] Flattened list argument {key}: {tool_args[key]}")
+
     # 0. Check for Override Format
     override = config.tool_schema_override.get(tool_name)
     override_fmt = override.get("format") if override else None
@@ -323,7 +342,10 @@ async def execute_tool(
     # 2. Setup Sandbox
     logger.debug(f"[Tool Executor] Setting up CaptureBot sandbox for user: dify_{user_id}")
     capture_bot = CaptureBot(origin_bot)
-    virtual_event = VirtualEvent(cmd_str, user_id=f"dify_{user_id}")
+
+    # FIX: Use unique session ID suffix to prevent Alconna/NoneBot caching issues
+    unique_suffix = str(uuid.uuid4())[:8]
+    virtual_event = VirtualEvent(cmd_str, user_id=f"dify_{user_id}", session_id=f"tool_session_{unique_suffix}")
 
     # 3. Execute with Timeout
     try:

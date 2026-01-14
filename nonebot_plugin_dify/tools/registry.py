@@ -19,34 +19,21 @@ from ..config import config
 _tool_name_mapping: Dict[str, str] = {}
 
 
-def _create_overridden_tool_defs(cmd_name: str, override: Dict[str, Any], default_desc: str) -> List[Dict[str, Any]]:
-    """Helper to generate multiple tool definitions (primary + aliases) from override."""
-    tools = []
+def _create_overridden_tool_def(cmd_name: str, override: Dict[str, Any], default_desc: str) -> Dict[str, Any]:
+    """Generate a single tool definition from override config."""
+    # Normalize name for API compatibility
+    normalized_name = _normalize_tool_name(cmd_name)
 
-    # 1. Primary Name
-    # Always use the original name (normalized) as the base
-    primary_name = _normalize_tool_name(cmd_name)
+    # Register mapping
+    _tool_name_mapping[normalized_name] = cmd_name
 
-    # Use a set to handle deduplication automatically
-    names_to_register = {primary_name}
+    schema = {
+        "name": normalized_name,
+        "description": override.get("description", default_desc),
+        "parameters": override["parameters"],
+    }
 
-    # 2. Aliases
-    aliases = override.get("aliases", [])
-    if isinstance(aliases, list):
-        names_to_register.update(aliases)
-
-    for name in names_to_register:
-        # Register mapping
-        _tool_name_mapping[name] = cmd_name
-
-        schema = {"name": name, "description": default_desc, "parameters": override["parameters"]}
-
-        if "description" in override:
-            schema["description"] = override["description"]
-
-        tools.append({"type": "function", "function": schema})
-
-    return tools
+    return {"type": "function", "function": schema}
 
 
 def get_tool_definitions() -> List[Dict[str, Any]]:
@@ -83,15 +70,13 @@ def get_tool_definitions() -> List[Dict[str, Any]]:
                 # Check for override
                 override = config.tool_schema_override.get(cmd.name)
                 if override and "parameters" in override:
-                    generated_tools = _create_overridden_tool_defs(
-                        cmd.name, override, cmd.help or f"Execute /{cmd.name} command"
+                    # Alconna uses meta.description, not .help
+                    default_desc = (
+                        cmd.meta.description if cmd.meta and cmd.meta.description else f"Execute /{cmd.name} command"
                     )
-                    tools.extend(generated_tools)
-
-                    for t in generated_tools:
-                        logger.debug(
-                            f"[Tool Registry] Using override schema for: {cmd.name} (alias: {t['function']['name']})"
-                        )
+                    tool_def = _create_overridden_tool_def(cmd.name, override, default_desc)
+                    tools.append(tool_def)
+                    logger.debug(f"[Tool Registry] Using override schema for: {cmd.name}")
                 else:
                     schema = _alconna_to_schema(cmd)
                     tool_def = {"type": "function", "function": schema}
@@ -138,15 +123,11 @@ def get_tool_definitions() -> List[Dict[str, Any]]:
                             # Check for override
                             override = config.tool_schema_override.get(cmd_name)
                             if override and "parameters" in override:
-                                generated_tools = _create_overridden_tool_defs(
+                                tool_def = _create_overridden_tool_def(
                                     cmd_name, override, f"Execute /{cmd_name} command"
                                 )
-                                tools.extend(generated_tools)
-
-                                for t in generated_tools:
-                                    logger.debug(
-                                        f"[Tool Registry] Using override schema for on_command: {cmd_name} (alias: {t['function']['name']})"
-                                    )
+                                tools.append(tool_def)
+                                logger.debug(f"[Tool Registry] Using override schema for on_command: {cmd_name}")
                             else:
                                 # Generate simple schema for on_command
                                 schema = _on_command_to_schema(cmd_name, plugin.name)

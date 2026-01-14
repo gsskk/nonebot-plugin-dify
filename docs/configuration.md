@@ -166,26 +166,29 @@
 
 ### TOOL_SCHEMA_OVERRIDE 示例
 
-用于自定义工具参数、命令格式和别名。
+**注意**：此配置项是**可选**的。对于简单的 `on_command`（如 `/weather 北京`），系统会自动生成 Schema 并正确执行，**无需**进行额外配置。
+
+**仅在以下情况建议配置**：
+1. **复杂参数**：命令需要复杂的参数组合（如 `/cmd -n 10 -t tag`），自动生成的 Schema 无法满足。
+2. **效果优化**：自动生成的描述不够准确，希望手动优化以提升 LLM 调用的成功率。
 
 ```json
 {
-  "weather": {
-    "aliases": ["天气", "yb"], 
+  "search": {
+    "description": "联网搜索，获取最新信息",
     "parameters": {
       "type": "object",
       "properties": {
-        "city": { "type": "string", "description": "City name" },
-        "days": { "type": "integer", "description": "Forecast days", "default": 3 }
+        "query": { "type": "string", "description": "搜索关键词" }
       },
-      "required": ["city"]
+      "required": ["query"]
     },
-    "format": "/weather {city} --days {days}"
+    "format": "/search {query}"
   }
 }
 ```
 
-- **aliases**: 为工具添加别名（如 `天气`）。所有别名都会指向原始命令 `weather`。
+- **description**: 告诉 LLM 何时使用此工具（这是最重要的字段）。
 - **parameters**: 覆盖自动生成的 JSON Schema。
 - **format**: 定义如何将工具调用参数转换为 NoneBot 命令字符串。
 
