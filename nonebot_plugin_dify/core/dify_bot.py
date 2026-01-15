@@ -68,19 +68,31 @@ class DifyBot:
                     if not _reply_type_list:
                         continue
 
-                    # Linger/Proactive silent handling logic per chunk?
-                    # Generally, streaming implies we are already committed to responding.
-                    # But for Linger, if we get an empty or <IGNORE> chunk, we should handle it?
-                    # Since we are yielding chunks, we check chunk content.
+                    # Global <IGNORE> token handling (defensive programming)
+                    if _reply_type_list == [ReplyType.TEXT]:
+                        content = _reply_content_list[0]
 
-                    # Check for <IGNORE> token if lingering/proactive in the first chunk or whole response
-                    # For streaming, this is tricky. If <IGNORE> comes, it should probably be the only thing.
-                    if (is_linger or is_proactive) and _reply_type_list == [ReplyType.TEXT]:
-                        content = _reply_content_list[0].strip()
                         if "<IGNORE>" in content:
-                            logger.debug("Suppressed response due to <IGNORE> token.")
-                            return
-                        if not content:
+                            # Strip the control token
+                            cleaned = content.replace("<IGNORE>", "").strip()
+
+                            if is_linger or is_proactive:
+                                # Expected behavior: silence signal in opportunistic modes
+                                logger.debug("Suppressed response due to <IGNORE> token (proactive/linger mode).")
+                                return
+                            else:
+                                # Unexpected leakage: log warning, attempt recovery
+                                logger.warning(
+                                    f"<IGNORE> token leaked in normal mode. Original content: {content[:100]!r}"
+                                )
+                                if not cleaned:
+                                    # Entire response was just <IGNORE>, skip this chunk
+                                    continue
+                                # Has remaining content, send cleaned version
+                                _reply_content_list[0] = cleaned
+
+                        # Skip empty content chunks
+                        if not _reply_content_list[0].strip():
                             continue
 
                     yield _reply_type_list, _reply_content_list

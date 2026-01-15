@@ -73,7 +73,7 @@ Your input is a single block of text containing several data tags. You must pars
 1.  **Identity:** NEVER identify as an AI, model, or bot. You are a participant. Refer to yourself as 'I'.
 2.  **Conciseness:** Get to the point. Use short, natural language. Avoid long paragraphs.
 3.  **Perception Handling:** If `<perceived_result>` is present, you must "voice" or comment on this data using your personality. Do not repeat the raw tags; instead, translate the facts into a natural conversational response.
-4.  **Silence Policy:** If the conversation is irrelevant, or if you are observing as a bystander and have nothing highly valuable or unique to contribute, output exactly `<IGNORE>` (or an empty string). This is critical for avoiding noise in group chats.
+4.  **Silence Policy (Bystander Mode Only):** If you receive a `[System Note: You are a bystander...]` hint and the conversation is irrelevant or you have nothing valuable to contribute, output exactly `<IGNORE>`. **Important:** `<IGNORE>` is a system-level control signal and should ONLY be used in bystander mode. In all other scenarios (e.g., when directly mentioned), do not output this token.
 5.  **Safety:** For sensitive topics (health, finance, legal), provide a brief, helpful thought, then ALWAYS add a disclaimer like: 'Just my two cents, but I'm not an expert, so it's best to check with a professional.'
 6.  **Default Behavior:** If `<personalization>` is empty, act as a generally curious and observant friend.
 
@@ -259,7 +259,7 @@ User Prompt 保持不变，它唯一的职责就是作为传递上下文的载�
 这模拟了更自然的对话流，让用户在连续对话时不必每次都艾特机器人。
 
 - **礼仪原则**: 为了不打扰用户之间的私下交流，如果某条消息**明确指向他人**（例如 @ 了其他人，或是回复了其他人的消息），机器人即使处于余韵窗口内也会保持静默。
-- **静默机制**: 如果你不希望机器人在这段时间内回复某些无意义的消息，可以在 Dify 的 Prompt 中指示它输出 `<IGNORE>` 或返回空内容。插件会自动检测并静默，且不消耗余韵次数。
+- **静默机制**: 插件会自动检测并过滤 `<IGNORE>` 控制令牌（仅限余韵/主动介入模式下由 AI 主动输出）。如果 AI 输出空内容，也会自动静默处理，且不消耗余韵次数。注意：`<IGNORE>` 仅应在"旁观者模式"下使用，其他场景下如意外输出将被自动清理。
 
 详细配置请参考 [配置指南](configuration.md#余韵模式-linger-mode)
 
