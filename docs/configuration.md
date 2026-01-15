@@ -153,6 +153,8 @@
 | TOOL_TIMEOUT | 否 | 30 | 工具执行超时时间（秒）。 |
 | TOOL_SANDBOX_API_ALLOWLIST | 否 | [] | 沙箱环境中允许调用的只读 API (JSON List)。例如 `["get_group_info"]`。 |
 | TOOL_SCHEMA_OVERRIDE | 否 | {} | **高级配置**：自定义工具的 Schema、命令格式和别名 (JSON Dict)。<br />用于手动指定复杂参数或为工具起别名。<br />格式详见下文示例。 |
+| TOOL_SKIP_ON_IMAGE | 否 | True | 当消息包含图片时，是否跳过 OpenAI 工具检测直接调用 Dify。<br />因为 OpenAI Tool LLM 难以结合上下文理解图片内容来生成工具调用，建议开启此项以利用 Dify 的图像识别能力。 |
+| TOOL_USE_CONTEXT | 否 | False | Tool Detection 是否使用聊天上下文（历史记录）。<br />False: 仅使用当前消息判断，避免被历史误导（默认）。<br />True: 包含完整群聊历史，支持多轮对话意图，但可能增加 Token 消耗和误判风险。 |
 
 ### OpenAI 兼容模型配置 (工具检测用)
 

@@ -186,6 +186,9 @@ class DifyBot:
             dify_api_user = full_user_id.split("+")[-1]
             driver = get_driver()
 
+            # Determine if image is present in context (current or replied)
+            has_image = bool(all_files) or bool(replied_image_path)
+
             async for replies_type, replies_content, meta in driver.chat(
                 query=final_query,
                 user_id=full_user_id,
@@ -193,6 +196,8 @@ class DifyBot:
                 files=all_files,
                 extra_context=dify_api_user,
                 disable_tools=is_perception,
+                has_image=has_image,
+                raw_query=query,  # Pass original query for isolated tool detection
             ):
                 # Handle conversation_id from metadata
                 if meta.get("conversation_id"):

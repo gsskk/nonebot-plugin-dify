@@ -438,7 +438,17 @@ class ToolAugmentedDifyDriver(LLMDriver):
         messages = [
             {
                 "role": "system",
-                "content": "You are a helpful assistant. Use the provided tools if necessary to answer the user's question. When extracting parameters for search tools, use only the most critical keywords (2-4 words per query). Be concise. If no tool is needed, respond with empty content.",
+                "content": """You are a tool detection assistant.
+Your ONLY job is to decide if a tool should be called. You do NOT generate final answers.
+
+Rules:
+1. Call a tool ONLY if user's intent is CLEAR and a tool can directly help.
+2. DO NOT GUESS. If unsure whether a tool applies, DO NOT call it.
+3. For image-related queries (e.g. "who is this?"), prefer NO tool unless you are 100% certain.
+4. For ambiguous or casual chat, return NO tool call.
+5. Keep tool parameters minimal and precise. Use 2-4 keywords max for search.
+
+If no tool is needed, respond with EMPTY content (no tool calls, no text).""",
             },
             {"role": "user", "content": query},
         ]
@@ -519,18 +529,31 @@ class ToolAugmentedDifyDriver(LLMDriver):
         files: Optional[list] = None,
         extra_context: Optional[str] = None,
         disable_tools: bool = False,
+        has_image: bool = False,
+        raw_query: Optional[str] = None,
     ) -> AsyncGenerator[Tuple[List[ReplyType], List[str], Dict[str, Any]], None]:
         """
         Two-stage flow:
         1. Detect and execute tools via OpenAI
         2. Pass augmented query to Dify for personalized response
         """
-        # Stage 1: Tool detection and execution (skip if disabled)
-        if disable_tools:
-            logger.debug("[ToolAugmented] Tools disabled for this request (proactive/perception mode)")
+        # Stage 1: Tool detection and execution (skip if disabled or image present)
+        skip_tools = disable_tools
+        if not skip_tools and has_image and config.tool_skip_on_image:
+            logger.debug("[ToolAugmented] Skipping tool detection: message contains image")
+            skip_tools = True
+
+        if skip_tools:
+            logger.debug("[ToolAugmented] Tools disabled for this request (proactive/perception mode or image skip)")
             tool_result = None
         else:
-            tool_result = await self._detect_and_execute_tools(query, user_id)
+            # Determine detection query: raw_query if isolation enabled (default), else full query
+            detection_query = query
+            if not config.tool_use_context and raw_query:
+                detection_query = raw_query
+                logger.debug("[ToolAugmented] Using raw query for tool detection (context isolation enabled)")
+
+            tool_result = await self._detect_and_execute_tools(detection_query, user_id)
 
         # Stage 2: Build final query for Dify
         if tool_result:

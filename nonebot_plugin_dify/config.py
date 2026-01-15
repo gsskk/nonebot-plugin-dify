@@ -274,6 +274,15 @@ class Config(BaseModel):
     格式：{"cmd_name": {"parameters": {...}, "format": "/cmd {arg}", "description": "..."}}
     """
 
+    tool_skip_on_image: bool = True
+    """当消息包含图片时，是否跳过 Tool Detection 阶段，直接使用 Dify 处理。
+    默认开启，因为 OpenAI Tool LLM 难以结合上下文理解图片内容来生成工具调用。"""
+
+    tool_use_context: bool = False
+    """Tool Detection 是否使用上下文（历史记录）。
+    默认关闭 (False)，仅使用当前消息进行意图识别，避免被历史话题干扰。
+    开启后将把群聊历史传给 Tool LLM。"""
+
     # --- Backward Compatibility Fields (Deprecated) ---
     dify_api_key: Optional[str] = None
     dify_app_type: Optional[str] = None
