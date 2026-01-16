@@ -195,7 +195,7 @@ class DifyBot:
                 proactive_user_hint=proactive_user_hint,
             )
 
-            dify_api_user = full_user_id.split("+")[-1]
+            dify_api_user = full_user_id
             driver = get_driver()
 
             # Determine if image is present in context (current or replied)

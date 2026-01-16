@@ -135,8 +135,8 @@ def get_full_user_id(event: Event, bot: Bot) -> str:
 
     user_id = event.get_user_id() if event.get_user_id() else "user"
 
-    # 特殊处理Discord
-    if adapter_name == "discord" and hasattr(event, "guild_id"):
+    # 特殊处理Discord（注意：私聊事件也有 guild_id 属性，但值为 None）
+    if adapter_name == "discord" and getattr(event, "guild_id", None):
         target_id = getattr(event, "channel_id", "private")
 
         has_record = record_manager.get_record_status(adapter_name, target_id)

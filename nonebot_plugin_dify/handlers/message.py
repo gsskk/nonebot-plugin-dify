@@ -159,7 +159,11 @@ async def send_reply_message(
                     final_msg = _uni_message
 
                 # 使用 UniMessage.send() 跨平台发送
-                await final_msg.send(target=target, bot=bot)
+                # 特殊处理 Discord 私聊：直接使用 channel_id 发送，避免 create_DM 错误
+                if bot.type == "Discord" and target.private and hasattr(event, "channel_id"):
+                    await bot.send_to(channel_id=event.channel_id, message=str(final_msg))
+                else:
+                    await final_msg.send(target=target, bot=bot)
                 has_replied = True
             except Exception as e:
                 logger.error(f"[DIFY] Failed to send response: {e}")

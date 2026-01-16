@@ -1,7 +1,7 @@
 import asyncio
 import shlex
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 import uuid
 
 from nonebot import logger
@@ -144,6 +144,66 @@ class VirtualMessage(Message):
         return VirtualMessage(self.text)
 
 
+def mock_generic(data: Dict[str, Any], message: Any, user_id: str) -> None:
+    """Fallback strategy: Must satisfy ALL inherited Pydantic models"""
+    data.setdefault("self_id", 123456)
+    data.setdefault("message", message)
+    data.setdefault("raw_message", str(message))
+
+    # Satisfy OneBot V11 validation if inherited
+    import random
+
+    data.setdefault("message_id", random.randint(10000, 99999999))
+    data.setdefault("time", 0)
+    data.setdefault("post_type", "message")
+    data.setdefault("message_type", "private")
+    data.setdefault("sub_type", "friend")
+
+    # Safely handle sender if not OneBot strategy
+    if "sender" not in data:
+        data["sender"] = {"user_id": 1, "nickname": "ToolUser"}
+
+    data.setdefault("font", 0)
+
+    # Satisfy Telegram validation if inherited
+    data.setdefault("date", 0)
+    data.setdefault("chat", {"id": 1, "type": "private"})
+    if "original_message" not in data:
+        data["original_message"] = message
+
+    # OneBot V11 requires user_id (int)
+    # If not set (e.g. Telegram strategy triggers), we must provide a fallback
+    if "user_id" not in data:
+        uid_int = 123456
+        if user_id.isdigit():
+            uid_int = int(user_id)
+        elif "_" in user_id and user_id.split("_")[-1].isdigit():
+            uid_int = int(user_id.split("_")[-1])
+        data["user_id"] = uid_int
+
+
+def mock_onebot_v11(data: Dict[str, Any], message: Any, user_id: str) -> None:
+    """OneBot V11 Strategy"""
+    mock_generic(data, message, user_id)
+    # OneBot logic is covered by generic fallback logic above which extracts user_id
+    # We can keep specific overrides here if needed, but generics MUST handle the baseline.
+
+
+def mock_telegram(data: Dict[str, Any], message: Any, user_id: str) -> None:
+    """Telegram Strategy"""
+    mock_generic(data, message, user_id)
+
+    # Telegram specific logic override
+    if "from" not in data and "from_" not in data:
+        data["from"] = {"id": 1, "is_bot": False, "first_name": "ToolUser"}
+
+
+ADAPTER_MOCK_STRATEGIES: Dict[str, Callable] = {
+    "OneBot V11": mock_onebot_v11,
+    "Telegram": mock_telegram,
+}
+
+
 class VirtualEvent(_EventBase):
     """
     A minimal Virtual Event for triggering matchers.
@@ -157,18 +217,19 @@ class VirtualEvent(_EventBase):
     _session_id: str = "tool_session"
     _virtual_message: Any = None
 
-    def __init__(self, message_str: str, user_id: str = "tool_user", session_id: str = "tool_session", **data):
-        # Inject dummy fields for common adapters to satisfy Pydantic validation
-
-        # Common defaults
-        data.setdefault("self_id", 123456)
-        data.setdefault("raw_message", message_str)
-        # Note: 'original_message' or 'message' field depends on adapter, set below.
-
+    def __init__(
+        self,
+        origin_bot: Bot,
+        message_str: str,
+        user_id: str = "tool_user",
+        session_id: str = "tool_session",
+        **data,
+    ):
+        # 1. Determine Message Class
         mro_str = str(self.__class__.__mro__)
-
-        # Decide which Message class to use
         MsgClass = VirtualMessage
+
+        # Keep this for Message class selection since we dynamic inherited
         if "nonebot.adapters.telegram" in mro_str and "nonebot.adapters.telegram" in _AdapterMessageClasses:
             MsgClass = _AdapterMessageClasses["nonebot.adapters.telegram"]
         elif "nonebot.adapters.onebot.v11" in mro_str and "nonebot.adapters.onebot.v11" in _AdapterMessageClasses:
@@ -176,62 +237,25 @@ class VirtualEvent(_EventBase):
 
         real_message = MsgClass(message_str)
 
-        import random
+        # 2. Apply Mock Strategy based on Bot Type
+        strategy = ADAPTER_MOCK_STRATEGIES.get(origin_bot.type, mock_generic)
+        strategy(data, real_message, user_id)
 
-        # Generate a random message_id to prevent Alconna/NoneBot from caching parsed commands
-        # causing subsequent tools to see old arguments.
-        # Range 10000-99999999 to avoid conflicting with real message IDs if possible.
-        random_msg_id = random.randint(10000, 99999999)
-
-        # Telegram
-        if "nonebot.adapters.telegram" in mro_str:
-            data.setdefault("message_id", random_msg_id)
-            data.setdefault("date", 0)
-            data.setdefault("chat", {"id": 1, "type": "private"})
-            # Telegram uses original_message usually
-            if "original_message" not in data:
-                data["original_message"] = real_message
-
-            if "from" not in data and "from_" not in data:
-                data["from"] = {"id": 1, "is_bot": False, "first_name": "ToolUser"}
-
-        # OneBot V11
-        if "nonebot.adapters.onebot.v11" in mro_str:
-            data.setdefault("message_id", random_msg_id)
-            data.setdefault("time", 0)
-            data.setdefault("post_type", "message")
-            data.setdefault("message_type", "private")
-            data.setdefault("sub_type", "friend")
-            data.setdefault("sender", {"user_id": 1, "nickname": "ToolUser"})
-
-            # OneBot uses 'message'
-            if "message" not in data:
-                data["message"] = real_message
-
-            uid_int = 123456
-            if user_id.isdigit():
-                uid_int = int(user_id)
-            elif "_" in user_id and user_id.split("_")[-1].isdigit():
-                uid_int = int(user_id.split("_")[-1])
-            data.setdefault("user_id", uid_int)
-            data.setdefault("font", 0)
-
-        # Call Pydantic's __init__
+        # 3. Call Pydantic Init
         try:
             super().__init__(**data)
         except Exception as e:
             logger.warning(
                 f"[Tool Executor] VirtualEvent pydantic validation failed: {e}. Proceeding with partial init."
             )
-            # Fallback for Alconna compatibility if pydantic init failed
+            # Fallback
             if "message_id" not in self.__dict__:
                 self.__dict__["message_id"] = data.get("message_id", 1)
 
-        # Then set our private attributes
+        # 4. Set Private Attributes
         object.__setattr__(self, "_message_str", message_str)
         object.__setattr__(self, "_user_id", user_id)
         object.__setattr__(self, "_session_id", session_id)
-        # Use simple object.__setattr__ to bypass pydantic checks on these private fields
         object.__setattr__(self, "_virtual_message", real_message)
 
     @overrides(Event)
@@ -345,7 +369,9 @@ async def execute_tool(
 
     # FIX: Use unique session ID suffix to prevent Alconna/NoneBot caching issues
     unique_suffix = str(uuid.uuid4())[:8]
-    virtual_event = VirtualEvent(cmd_str, user_id=f"dify_{user_id}", session_id=f"tool_session_{unique_suffix}")
+    virtual_event = VirtualEvent(
+        origin_bot, cmd_str, user_id=f"dify_{user_id}", session_id=f"tool_session_{unique_suffix}"
+    )
 
     # 3. Execute with Timeout
     try:
