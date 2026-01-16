@@ -6,7 +6,7 @@
 |:-----:|:----:|:---:|:---|
 | DIFY_API_BASE | 否 | https://api.dify.ai/v1 | DIFY API地址，支持自建 |
 | DIFY_MAIN_APP_API_KEY | 是 | N/A | DIFY主APP的API KEY |
-| DIFY_MAIN_APP_TYPE | 否 | chatbot | DIFY主APP的类型：chatbot/chatflow，agent，workflow |
+| DIFY_MAIN_APP_TYPE | 否 | chatflow | 助手类型：chatflow (推荐) / chatbot (兼容) / agent / workflow |
 | DIFY_API_TIMEOUT | 否 | 90 | DIFY接口超时时间（单位秒） |
 
 ## 流式输出 (Streaming)

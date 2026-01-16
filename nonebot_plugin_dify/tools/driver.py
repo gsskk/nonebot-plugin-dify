@@ -42,8 +42,9 @@ class LLMDriver(ABC):
 
 class DifyAppDriver(LLMDriver):
     """
-    Driver for Dify App (Chatbot/Agent/Workflow).
+    Driver for Dify App (Chatflow/Chatbot/Agent/Workflow).
     Wraps the legacy logic from DifyBot.
+    - Chatflow/Chatbot shares the same handler (_handle_chatbot).
     """
 
     async def chat(
@@ -63,16 +64,19 @@ class DifyAppDriver(LLMDriver):
                 async for res in self._handle_chatbot(query, conversation_id, dify_user, files):
                     yield res
             elif dify_app_type == "agent":
-                async for res in self._handle_agent(query, conversation_id, dify_user):
+                async for res in self._handle_agent(query, conversation_id, dify_user, files):
                     yield res
             elif dify_app_type == "workflow":
-                # Workflows don't support files/conversation_id in the same way usually,
-                # but we follow legacy signature
-                async for res in self._handle_workflow(query, dify_user):
+                # Workflows don't support conversation_id usually, but support files now
+                async for res in self._handle_workflow(query, dify_user, files):
                     yield res
             else:
                 logger.error(f"Invalid dify_main_app_type configuration: {dify_app_type}")
-                yield [ReplyType.TEXT], ["配置错误：dify_main_app_type 必须是 agent、chatbot/chatflow 或 workflow"], {}
+                yield (
+                    [ReplyType.TEXT],
+                    ["配置错误：dify_main_app_type 必须是 chatflow(推荐)、chatbot、agent 或 workflow"],
+                    {},
+                )
         except Exception as e:
             logger.error(f"Internal reply error in DifyAppDriver: {e}")
             yield [ReplyType.TEXT], [""], {}
@@ -152,6 +156,7 @@ class DifyAppDriver(LLMDriver):
         query: str,
         conversation_id: str,
         user: str,
+        files: list = None,
     ):
         try:
             payload = {
@@ -160,6 +165,7 @@ class DifyAppDriver(LLMDriver):
                 "response_mode": "streaming",
                 "conversation_id": conversation_id,
                 "user": user,
+                "files": files,
             }
 
             if config.dify_stream_enable:
@@ -198,9 +204,14 @@ class DifyAppDriver(LLMDriver):
             logger.error(f"Unexpected error in agent handler: {e}")
             yield [ReplyType.TEXT], ["处理 Dify-Agent 回复时遇到未知错误。"], {}
 
-    async def _handle_workflow(self, query: str, user: str):
+    async def _handle_workflow(self, query: str, user: str, files: list = None):
         try:
-            payload = {"inputs": {"query": query}, "response_mode": "blocking", "user": user}
+            payload = {
+                "inputs": {"query": query},
+                "response_mode": "blocking",
+                "user": user,
+                "files": files,
+            }
 
             async with httpx.AsyncClient(timeout=httpx.Timeout(config.dify_api_timeout)) as client:
                 response = await client.post(

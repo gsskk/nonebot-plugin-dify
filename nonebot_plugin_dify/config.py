@@ -20,8 +20,14 @@ class Config(BaseModel):
     dify_main_app_api_key: str = "app-xxx"
     """dify app的api key，参见dify API页面"""
 
-    dify_main_app_type: str = "chatbot"
-    """dify助手类型 chatbot(或chatflow，对应聊天助手)/agent(对应Agent)/workflow(对应工作流)，默认为chatbot"""
+    dify_main_app_type: str = "chatflow"
+    """dify助手类型:
+    - chatflow: 对话工作流 (推荐，支持高级编排)
+    - chatbot: 基础聊天机器人 (兼容模式)
+    - agent: 代理模式
+    - workflow: 纯工作流模式
+    默认为 chatflow (推荐)
+    """
 
     dify_stream_enable: bool = False
     """是否开启流式输出模式，开启后将分段发送回复，减少感知延迟"""

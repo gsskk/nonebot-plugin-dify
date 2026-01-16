@@ -55,7 +55,7 @@ plugins = ["nonebot_plugin_dify"]
 ```env
 DIFY_API_BASE=https://api.dify.ai/v1
 DIFY_MAIN_APP_API_KEY=app-xxxxxxxxxxx
-DIFY_MAIN_APP_TYPE=chatbot
+DIFY_MAIN_APP_TYPE=chatflow
 DIFY_API_TIMEOUT=90
 ```
 
