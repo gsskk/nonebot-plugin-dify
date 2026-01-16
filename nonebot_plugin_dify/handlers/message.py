@@ -78,6 +78,7 @@ async def send_reply_message(
     proactive_user_hint: str = None,
     is_perception: bool = False,
     is_reply_to_bot: bool = False,
+    is_explicit_at: bool = True,
 ) -> None:
     """发送回复消息"""
     user_id = event.get_user_id() or "user"
@@ -150,8 +151,13 @@ async def send_reply_message(
                 # 判定是否需要艾特回去：只有在非私聊、非主动接管、非余韵模式下才艾特
                 # 且如果是流式输出，只在第一段艾特
                 # 如果是回复 Bot 且配置了跳过 @，则不艾特
+                # 如果是昵称触发（非显式@），则不艾特
                 skip_at_bot = is_reply_to_bot and config.bot_reply_skip_at
-                should_at = not (target.private or is_proactive or is_linger or skip_at_bot) and not has_replied
+                should_at = (
+                    not (target.private or is_proactive or is_linger or skip_at_bot)
+                    and not has_replied
+                    and is_explicit_at
+                )
 
                 if should_at:
                     final_msg = alconna.UniMessage([alconna.At("user", user_id), "\n", _uni_message])
@@ -455,12 +461,19 @@ async def handle_message(bot: Bot, event: Event):
         else:
             # 处理群聊消息
             is_mentioned = event.is_tome()
-            # 备用at检查，应对is_tome()在某些情况下失效
-            if not is_mentioned and uni_msg.has(alconna.At):
+
+            # 检测是否显式@（消息中包含 At 段落且目标是 bot）
+            # 用于区分昵称触发和真正的@，昵称触发时回复不带@
+            is_explicit_at = False
+            if uni_msg.has(alconna.At):
                 for seg in uni_msg[alconna.At]:
                     if str(seg.target) == str(bot.self_id):
-                        is_mentioned = True
+                        is_explicit_at = True
                         break
+
+            # 备用at检查，应对is_tome()在某些情况下失效
+            if not is_mentioned and is_explicit_at:
+                is_mentioned = True
 
             # --- Check for mentions or replies to others ---
             mentions_others = False
@@ -691,6 +704,7 @@ async def handle_message(bot: Bot, event: Event):
                 at_user_ids=at_user_ids,
                 is_linger=is_linger,
                 is_reply_to_bot=is_from_bot,
+                is_explicit_at=is_explicit_at if not target.private else True,
             )
 
             # Update last interaction time after successful reply to delay subsequent linger triggers
