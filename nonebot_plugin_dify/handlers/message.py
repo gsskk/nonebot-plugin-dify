@@ -30,7 +30,9 @@ from ..utils.helpers import (
     ignore_rule,
     save_pic,
     get_pic_from_url,
+    is_sender_bot,
 )
+from ..storage.group_store import group_user_memory
 from ..utils.reply_type import ReplyType
 from ..utils.image import ImageUtils
 from ..core.cache import USER_IMAGE_CACHE
@@ -75,6 +77,7 @@ async def send_reply_message(
     is_proactive: bool = False,
     proactive_user_hint: str = None,
     is_perception: bool = False,
+    is_reply_to_bot: bool = False,
 ) -> None:
     """发送回复消息"""
     user_id = event.get_user_id() or "user"
@@ -146,7 +149,9 @@ async def send_reply_message(
             try:
                 # 判定是否需要艾特回去：只有在非私聊、非主动接管、非余韵模式下才艾特
                 # 且如果是流式输出，只在第一段艾特
-                should_at = not (target.private or is_proactive or is_linger) and not has_replied
+                # 如果是回复 Bot 且配置了跳过 @，则不艾特
+                skip_at_bot = is_reply_to_bot and config.bot_reply_skip_at
+                should_at = not (target.private or is_proactive or is_linger or skip_at_bot) and not has_replied
 
                 if should_at:
                     final_msg = alconna.UniMessage([alconna.At("user", user_id), "\n", _uni_message])
@@ -316,6 +321,17 @@ async def handle_message(bot: Bot, event: Event):
         full_user_id = get_full_user_id(event, bot)
         session_id = f"s-{full_user_id}"
 
+        # 1. Bot Sender Detection
+        is_from_bot = is_sender_bot(event, bot)
+        if not is_from_bot and not target.private:
+            # Fallback to group member profile
+            profile = group_user_memory.get_user_profile(adapter_name, target.id, user_id)
+            if profile.get("is_bot"):
+                is_from_bot = True
+
+        if is_from_bot:
+            logger.debug(f"Message from BOT detected: {user_id}")
+
         # 处理消息中的图片（即使没有文本也要缓存图片，供后续引用）
         if uni_msg.has(alconna.Image):
             try:
@@ -355,6 +371,28 @@ async def handle_message(bot: Bot, event: Event):
         if not target.private:
             group_state_id = f"{adapter_name}+{target.id}"
             group_state = session_manager.get_group_state(group_state_id)
+
+            # 2. Bot Loop Counter & Suppression
+            if config.bot_loop_protection_enable and group_state:
+                if is_from_bot:
+                    group_state.consecutive_bot_messages += 1
+                    group_state.last_bot_message_time = time.time()
+
+                    # Hard Limit Check
+                    if group_state.consecutive_bot_messages >= config.bot_consecutive_limit:
+                        logger.warning(
+                            f"Bot loop detected! Consecutive bot messages: {group_state.consecutive_bot_messages}. "
+                            f"Suppressing reply to {user_id}."
+                        )
+                        await receive_message.finish()
+
+                    # Probabilistic Silence
+                    if random.random() < config.bot_silence_probability:
+                        logger.info(f"Probabilistic silence activated for bot message from {user_id}.")
+                        await receive_message.finish()
+                else:
+                    # Reset on human message
+                    group_state.consecutive_bot_messages = 0
 
         # 处理私聊消息
         if target.private:
@@ -648,6 +686,7 @@ async def handle_message(bot: Bot, event: Event):
                 replied_image_path=replied_image_path,
                 at_user_ids=at_user_ids,
                 is_linger=is_linger,
+                is_reply_to_bot=is_from_bot,
             )
 
             # Update last interaction time after successful reply to delay subsequent linger triggers

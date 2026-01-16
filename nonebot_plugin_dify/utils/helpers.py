@@ -255,3 +255,28 @@ async def get_sender_nickname(event: Event, user_id: str, bot: Bot) -> str:
         nickname = getattr(sender, "card", None) or getattr(sender, "nickname", None) or nickname
 
     return str(nickname) if nickname else str(user_id)
+
+
+def is_sender_bot(event: Event, bot: Bot) -> bool:
+    """跨平台检测消息发送者是否为 Bot"""
+    # 1. OneBot V11
+    if hasattr(event, "sender") and hasattr(event.sender, "is_bot"):
+        return bool(getattr(event.sender, "is_bot", False))
+
+    # 2. Telegram
+    if hasattr(event, "from_") and hasattr(event.from_, "is_bot"):
+        return bool(getattr(event.from_, "is_bot", False))
+
+    # 3. Discord
+    if hasattr(event, "author") and hasattr(event.author, "bot"):
+        return bool(getattr(event.author, "bot", False))
+
+    # 4. Universal Fallback (if sender is dict or object with is_bot)
+    if hasattr(event, "sender"):
+        sender = event.sender
+        if isinstance(sender, dict):
+            return bool(sender.get("is_bot", False))
+        elif hasattr(sender, "is_bot"):
+            return bool(getattr(sender, "is_bot", False))
+
+    return False

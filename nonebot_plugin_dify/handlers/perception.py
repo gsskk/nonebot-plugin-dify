@@ -81,7 +81,6 @@ async def handle_perception(bot: Bot, api: str, data: Dict[str, Any]):
     is_plugin_intercept = plugin_name in config.perception_intercept_plugins
 
     # B. 命令强制拦截 (即使插件不在拦截名单)
-    # B. 命令强制拦截 (即使插件不在拦截名单)
     is_command_intercept = False
     if user_msg_text:
         target_cmds = config.perception_intercept_commands

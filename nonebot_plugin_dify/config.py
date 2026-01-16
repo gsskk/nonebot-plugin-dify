@@ -230,6 +230,19 @@ class Config(BaseModel):
     system_admin_user_id: Optional[str] = None
     """用于接收系统关键告警的管理员的“完整用户ID”，可以通过私聊机器人发送 /get_my_id 命令获取"""
 
+    # Bot Loop Prevention
+    bot_loop_protection_enable: bool = True
+    """启用 Bot 循环防护"""
+
+    bot_reply_skip_at: bool = True
+    """回复 Bot 消息时不发送 @"""
+
+    bot_consecutive_limit: int = 3
+    """连续 Bot 消息达到此数量后静默"""
+
+    bot_silence_probability: float = 0
+    """对 Bot 消息的静默概率 (0-1)"""
+
     # --- Tool System & OpenAI Configuration ---
     tool_enable: bool = False
     """是否启用 Tool 系统（及 OpenAI 兼容模式）。开启后 plugin 将作为 Tool Provider，并尝试从 tool_model_base_url 加载 LLM。"""
