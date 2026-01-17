@@ -173,6 +173,9 @@
 **仅在以下情况建议配置**：
 1. **复杂参数**：命令需要复杂的参数组合（如 `/cmd -n 10 -t tag`），自动生成的 Schema 无法满足。
 2. **效果优化**：自动生成的描述不够准确，希望手动优化以提升 LLM 调用的成功率。
+3. **插件集成**：集成第三方插件（如搜索、天气、群管等），需要定义清晰的调用格式。
+
+#### 基础示例
 
 ```json
 {
@@ -193,3 +196,150 @@
 - **description**: 告诉 LLM 何时使用此工具（这是最重要的字段）。
 - **parameters**: 覆盖自动生成的 JSON Schema。
 - **format**: 定义如何将工具调用参数转换为 NoneBot 命令字符串。
+
+---
+
+#### 示例 1：nonebot_plugin_tavily (联网搜索)
+
+使用 [nonebot-plugin-tavily](https://github.com/gsskk/nonebot-plugin-tavily) 插件提供网页搜索、内容提取和爬虫功能：
+
+```bash
+# .env 配置
+TOOL_ENABLE=True
+TOOL_ALLOWLIST='["search", "extract", "crawl"]'
+TOOL_SCHEMA_OVERRIDE='{
+  "search": {
+    "description": "Search the internet for real-time information. Use for news, facts, products, or any query requiring up-to-date data.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "The search query string, e.g. 广州今日新闻 or latest iPhone price"
+        }
+      },
+      "required": ["query"]
+    },
+    "format": "/search {query}"
+  },
+  "extract": {
+    "description": "Extract and summarize the main content from a web page URL. Use when you need to read an article or get page details.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "The full URL of the web page to extract, e.g. https://example.com/article"
+        }
+      },
+      "required": ["url"]
+    },
+    "format": "/extract {url}"
+  },
+  "crawl": {
+    "description": "Crawl a website to find specific data based on instructions. Use for job listings, product catalogs, or structured data extraction.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "The starting URL of the website to crawl, e.g. https://company.com/careers"
+        },
+        "instr": {
+          "type": "string",
+          "description": "Instructions describing what to find, e.g. Find all software engineer job postings"
+        }
+      },
+      "required": ["url"]
+    },
+    "format": "/crawl {url} --instructions {instr}"
+  }
+}'
+```
+
+---
+
+#### 示例 2：天气查询插件
+
+假设安装了 `nonebot_plugin_nmcweather`，命令格式为 `/天气 城市名`：
+
+对于简单格式，可以不配置 `TOOL_SCHEMA_OVERRIDE`，Dify 会自动生成 JSON Schema。
+
+---
+
+#### 示例 3：群管插件
+
+假设安装了群管插件，可让 AI 执行禁言、踢人等操作：
+
+```json
+{
+  "mute": {
+    "description": "禁言群成员。仅在管理员明确要求时使用。",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "user_id": {
+          "type": "string",
+          "description": "要禁言的用户 QQ 号"
+        },
+        "duration": {
+          "type": "integer",
+          "description": "禁言时长（分钟），0 表示解除禁言"
+        }
+      },
+      "required": ["user_id", "duration"]
+    },
+    "format": "/mute {user_id} {duration}"
+  },
+  "kick": {
+    "description": "踢出群成员。仅在管理员明确要求时使用。",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "user_id": {
+          "type": "string",
+          "description": "要踢出的用户 QQ 号"
+        }
+      },
+      "required": ["user_id"]
+    },
+    "format": "/kick {user_id}"
+  }
+}
+```
+
+> ⚠️ **安全提示**：群管类工具请谨慎配置，建议在 Dify 后台的 System Prompt 中明确限制使用场景。
+
+---
+
+#### 示例 4：多命令格式
+
+对于复杂的命令行参数格式：
+
+```json
+{
+  "translate": {
+    "description": "翻译文本到指定语言",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "text": {
+          "type": "string",
+          "description": "要翻译的文本"
+        },
+        "from_lang": {
+          "type": "string",
+          "description": "源语言代码，如 en、zh、ja"
+        },
+        "to_lang": {
+          "type": "string",
+          "description": "目标语言代码，如 en、zh、ja"
+        }
+      },
+      "required": ["text", "to_lang"]
+    },
+    "format": "/translate --from {from_lang} --to {to_lang} {text}"
+  }
+}
+```
+

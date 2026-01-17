@@ -506,17 +506,25 @@ async def handle_message(bot: Bot, event: Event):
                         if group_state.linger_message_count < config.linger_max_messages:
                             # 1. Check Minimum Interval
                             if time_since_last >= config.linger_min_interval_seconds:
-                                # 2. Check Probability
+                                # 2. Calculate decayed probability based on time elapsed
+                                # Formula: effective_prob = base_prob × (1 - elapsed/timeout)
+                                decay_factor = 1.0 - (time_since_last / config.linger_timeout_seconds)
+                                effective_probability = config.linger_response_probability * decay_factor
+
+                                # 3. Check Probability
                                 rnd = random.random()
-                                if rnd <= config.linger_response_probability:
+                                if rnd <= effective_probability:
                                     logger.debug(
-                                        f"Linger mode active: {time_since_last:.1f}s since last, count {group_state.linger_message_count}"
+                                        f"Linger mode active: {time_since_last:.1f}s since last, "
+                                        f"count {group_state.linger_message_count}, "
+                                        f"effective_prob {effective_probability:.2f} (decay {decay_factor:.2f})"
                                     )
                                     is_mentioned = True
                                     is_linger = True
                                 else:
                                     logger.debug(
-                                        f"Linger suppressed: probability check failed (random={rnd:.2f} > prob={config.linger_response_probability})"
+                                        f"Linger suppressed: probability check failed "
+                                        f"(random={rnd:.2f} > effective_prob={effective_probability:.2f})"
                                     )
                             else:
                                 logger.debug(
