@@ -419,16 +419,22 @@ class ToolAugmentedDifyDriver(LLMDriver):
             raise RuntimeError("OpenAI library missing")
         return AsyncOpenAI(api_key=self.api_key, base_url=self.base_url)
 
-    async def _detect_and_execute_tools(self, query: str, user_id: str) -> Optional[str]:
+    async def _detect_and_execute_tools(self, query: str, user_id: str, full_user_id: str = "") -> Optional[str]:
         """
         Use OpenAI to detect if tools are needed.
         If yes, execute tools and return formatted result string.
         If no, return None.
+
+        Args:
+            query: The user query for tool detection
+            user_id: Short user ID for logging/sandbox
+            full_user_id: Full session ID for permission filtering (e.g., "onebotv11+private+123")
         """
         from .registry import get_tool_definitions
         from .executor import execute_tool
 
-        tools = get_tool_definitions()
+        # Pass full_user_id to filter tools by permission
+        tools = get_tool_definitions(full_user_id if full_user_id else None)
         if not tools:
             logger.debug("[ToolAugmented] No tools available, skipping tool detection")
             return None
@@ -502,7 +508,9 @@ If no tool is needed, respond with EMPTY content (no tool calls, no text).""",
                 )
 
                 if origin_bot:
-                    result_obj = await execute_tool(original_name, func_args, origin_bot, user_id)
+                    result_obj = await execute_tool(
+                        original_name, func_args, origin_bot, user_id, full_user_id=full_user_id
+                    )
                     tool_result = result_obj.result
                     if result_obj.error:
                         tool_result = f"Error: {result_obj.error}"
@@ -564,7 +572,9 @@ If no tool is needed, respond with EMPTY content (no tool calls, no text).""",
                 detection_query = raw_query
                 logger.debug("[ToolAugmented] Using raw query for tool detection (context isolation enabled)")
 
-            tool_result = await self._detect_and_execute_tools(detection_query, user_id)
+            tool_result = await self._detect_and_execute_tools(
+                detection_query, user_id, full_user_id=extra_context or ""
+            )
 
         # Stage 2: Build final query for Dify
         if tool_result:

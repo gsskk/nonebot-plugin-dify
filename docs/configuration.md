@@ -196,8 +196,39 @@
 - **description**: 告诉 LLM 何时使用此工具（这是最重要的字段）。
 - **parameters**: 覆盖自动生成的 JSON Schema。
 - **format**: 定义如何将工具调用参数转换为 NoneBot 命令字符串。
+- **allowed_users**: （可选）限制工具访问权限，仅匹配的用户可使用。支持通配符。
 
----
+#### 权限控制 (allowed_users)
+
+通过 `allowed_users` 字段限制工具仅对特定用户/群组开放：
+
+```json
+{
+  "mcp": {
+    "description": "调用 MCP 服务",
+    "parameters": { ... },
+    "format": "/mcp {server} {tool} {args}",
+    "allowed_users": [
+      "onebotv11+private+123456789",
+      "onebotv11+*+123456789",
+      "telegram+*"
+    ]
+  }
+}
+```
+
+**通配符规则**（使用 fnmatch 模式）：
+
+| 模式 | 匹配范围 |
+|------|----------|
+| `onebotv11+private+123456789` | 仅匹配该用户的 OneBot V11 私聊 |
+| `onebotv11+*+123456789` | 匹配该用户在任何 OneBot V11 群组 |
+| `telegram+*` | 匹配所有 Telegram 用户 |
+| `*+private+*` | 匹配所有平台的私聊用户 |
+
+> 💡 **提示**：可通过私聊机器人发送 `/get_my_id` 获取你的完整 Session ID。
+
+> ⚠️ **不配置 `allowed_users`** 时，工具对所有用户开放（默认行为）。
 
 #### 示例 1：nonebot_plugin_tavily (联网搜索)
 
@@ -289,7 +320,10 @@ TOOL_SCHEMA_OVERRIDE='{
       },
       "required": ["user_id", "duration"]
     },
-    "format": "/mute {user_id} {duration}"
+    "format": "/mute {user_id} {duration}",
+    "allowed_users": [
+      "onebotv11+123456+123456789",
+    ]
   },
   "kick": {
     "description": "踢出群成员。仅在管理员明确要求时使用。",
@@ -303,7 +337,10 @@ TOOL_SCHEMA_OVERRIDE='{
       },
       "required": ["user_id"]
     },
-    "format": "/kick {user_id}"
+    "format": "/kick {user_id}",
+    "allowed_users": [
+      "onebotv11+123456+123456789",
+    ]
   }
 }
 ```

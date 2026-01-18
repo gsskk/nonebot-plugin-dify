@@ -1,4 +1,5 @@
 import asyncio
+import re
 import shlex
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
@@ -292,19 +293,47 @@ async def execute_tool(
     tool_args: Dict[str, Any],
     origin_bot: Bot,
     user_id: str,
+    full_user_id: str = "",
 ) -> ToolExecutionResult:
     """
     Execute a tool in the sandbox.
     Supports both Alconna commands and traditional on_command handlers.
+
+    Args:
+        tool_name: The tool/command name
+        tool_args: Arguments for the tool
+        origin_bot: The original Bot instance
+        user_id: Short user ID for sandbox
+        full_user_id: Full session ID for permission check (fallback security)
     """
     logger.debug(f"[Tool Executor] Starting execution of tool: {tool_name}")
     logger.debug(f"[Tool Executor] Tool arguments: {tool_args}")
 
+    # Fallback permission check (second layer of security)
+    if full_user_id:
+        from .registry import check_tool_user_permission
+
+        if not check_tool_user_permission(tool_name, full_user_id):
+            logger.warning(f"[Tool Executor] Permission denied: {full_user_id} -> {tool_name}")
+            return ToolExecutionResult(result="", error=f"权限不足：你没有使用 {tool_name} 的权限")
+
     # Fallback: Normalize common parameter mismatches (LLM hallucinations)
-    # e.g. queries -> query
-    if "queries" in tool_args and "query" not in tool_args:
-        logger.debug("[Tool Executor] Applied fallback: queries -> query")
-        tool_args["query"] = tool_args.pop("queries")
+    # Map common LLM hallucinated names to expected parameter names
+    PARAM_ALIASES = {
+        "queries": "query",
+        "name": "tool",
+        "capability": "tool",
+        "tool_name": "tool",
+        "command": "tool",
+        "action": "tool",
+        "arguments": "args",
+        "params": "args",
+        "parameters": "args",
+    }
+    for alias, canonical in PARAM_ALIASES.items():
+        if alias in tool_args and canonical not in tool_args:
+            logger.debug(f"[Tool Executor] Applied fallback: {alias} -> {canonical}")
+            tool_args[canonical] = tool_args.pop(alias)
 
     # Handle list arguments (e.g. query=['a', 'b']) -> join with spaces
     for key, value in tool_args.items():
@@ -324,11 +353,13 @@ async def execute_tool(
     if override_fmt:
         logger.debug(f"[Tool Executor] Using override format for {tool_name}: {override_fmt}")
         try:
-            cmd_str = override_fmt.format(**tool_args)
+            # Extract all placeholders from format string and default missing ones to ""
+            placeholders = re.findall(r"\{(\w+)\}", override_fmt)
+            format_args = {p: tool_args.get(p, "") for p in placeholders}
+            cmd_str = override_fmt.format(**format_args).strip()
+            # Clean up multiple consecutive spaces from empty optional args
+            cmd_str = re.sub(r"\s+", " ", cmd_str).strip()
             logger.debug(f"[Tool Executor] Formatted command: {cmd_str}")
-            # Skip auto-construction logic
-        except KeyError as e:
-            return ToolExecutionResult(result="", error=f"Missing argument for command format: {e}")
         except Exception as e:
             return ToolExecutionResult(result="", error=f"Failed to format command string: {e}")
 

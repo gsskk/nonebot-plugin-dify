@@ -1,4 +1,5 @@
-from typing import Dict, List, Any, get_origin, get_args
+from typing import Dict, List, Any, Optional, get_origin, get_args
+import fnmatch
 import re
 import hashlib
 
@@ -36,13 +37,47 @@ def _create_overridden_tool_def(cmd_name: str, override: Dict[str, Any], default
     return {"type": "function", "function": schema}
 
 
-def get_tool_definitions() -> List[Dict[str, Any]]:
+def check_tool_user_permission(tool_name: str, full_user_id: str) -> bool:
+    """
+    Check if user has permission to use the tool based on allowed_users config.
+    Uses fnmatch for wildcard pattern matching.
+
+    Args:
+        tool_name: The tool/command name
+        full_user_id: User's full session ID (e.g., "onebotv11+private+123456789")
+
+    Returns:
+        True if user has permission, False otherwise
+    """
+    override = config.tool_schema_override.get(tool_name)
+    if not override:
+        return True  # No override = no restriction
+
+    allowed_users = override.get("allowed_users")
+    if not allowed_users:
+        return True  # No allowed_users = open to all
+
+    # Check if user matches any pattern
+    for pattern in allowed_users:
+        if fnmatch.fnmatch(full_user_id, pattern):
+            logger.debug(f"[Tool Registry] Permission granted: {full_user_id} matches {pattern}")
+            return True
+
+    logger.debug(f"[Tool Registry] Permission denied: {full_user_id} not in allowed_users for {tool_name}")
+    return False
+
+
+def get_tool_definitions(full_user_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """
     Scan all registered Alconna commands AND traditional on_command handlers,
     then generate JSON Schemas for allowed tools.
+
+    Args:
+        full_user_id: If provided, filter tools by user permission (dual-layer filtering)
     """
     if not config.tool_enable:
         logger.debug("[Tool Registry] Tool system disabled (tool_enable=False)")
+        return []
         return []
 
     allowlist = config.tool_allowlist or set()
@@ -64,6 +99,11 @@ def get_tool_definitions() -> List[Dict[str, Any]]:
 
         for cmd in commands:
             if cmd.name not in allowlist:
+                continue
+
+            # Permission check: skip tools user cannot access
+            if full_user_id and not check_tool_user_permission(cmd.name, full_user_id):
+                logger.debug(f"[Tool Registry] Filtered out {cmd.name}: user {full_user_id} not allowed")
                 continue
 
             try:
@@ -118,6 +158,13 @@ def get_tool_definitions() -> List[Dict[str, Any]]:
                             if cmd_name in discovered_names:
                                 continue
                             if cmd_name not in allowlist:
+                                continue
+
+                            # Permission check: skip tools user cannot access
+                            if full_user_id and not check_tool_user_permission(cmd_name, full_user_id):
+                                logger.debug(
+                                    f"[Tool Registry] Filtered out {cmd_name}: user {full_user_id} not allowed"
+                                )
                                 continue
 
                             # Check for override
