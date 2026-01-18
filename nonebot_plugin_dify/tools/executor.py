@@ -395,13 +395,16 @@ async def execute_tool(
     logger.info(f"[Tool Executor] Running command: {cmd_str}")
 
     # 2. Setup Sandbox
-    logger.debug(f"[Tool Executor] Setting up CaptureBot sandbox for user: dify_{user_id}")
+    # Extract simple user_id from full session ID (e.g., "onebotv11+private+123" -> "123")
+    # This enables transparent pass-through: third-party plugins will see the real user ID
+    simple_user_id = user_id.split("+")[-1] if "+" in user_id else user_id
+    logger.debug(f"[Tool Executor] Setting up CaptureBot sandbox for user: {simple_user_id}")
     capture_bot = CaptureBot(origin_bot)
 
     # FIX: Use unique session ID suffix to prevent Alconna/NoneBot caching issues
     unique_suffix = str(uuid.uuid4())[:8]
     virtual_event = VirtualEvent(
-        origin_bot, cmd_str, user_id=f"dify_{user_id}", session_id=f"tool_session_{unique_suffix}"
+        origin_bot, cmd_str, user_id=simple_user_id, session_id=f"tool_session_{unique_suffix}"
     )
 
     # 3. Execute with Timeout
