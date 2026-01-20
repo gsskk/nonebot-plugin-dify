@@ -1,6 +1,6 @@
 [project]
 name = "nonebot-plugin-dify"
-version = "0.1.13"
+version = "0.1.14"
 description = "A Nonebot plugin for interacting with Dify"
 readme = "README.md"
 requires-python = ">=3.10"

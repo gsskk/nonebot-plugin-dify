@@ -20,7 +20,7 @@ from .core.dify_bot import DifyBot
 # 创建 DifyBot 实例
 dify_bot = DifyBot()
 
-__version__ = "0.1.13"
+__version__ = "0.1.14"
 
 __plugin_meta__ = PluginMetadata(
     name="dify插件",
