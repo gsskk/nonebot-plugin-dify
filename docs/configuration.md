@@ -234,6 +234,8 @@
 
 使用 [nonebot-plugin-tavily](https://github.com/gsskk/nonebot-plugin-tavily) 插件提供网页搜索、内容提取和爬虫功能：
 
+> 💡 **提示**：需要在 `TOOL_ALLOWLIST` 中添加对应的命令名称，如 `'["search", "extract", "crawl"]'`。
+
 ```bash
 # .env 配置
 TOOL_ENABLE=True
@@ -288,6 +290,13 @@ TOOL_SCHEMA_OVERRIDE='{
 }'
 ```
 
+**对话示例**：
+> 用户：帮我查一下广州今天的新闻
+>
+> Bot (思考中): 识别到工具调用 `search`...
+>
+> Bot: (调用工具 `/search 广州今天的新闻`) ... 根据搜索结果，今天广州...
+
 ---
 
 #### 示例 2：天气查询插件
@@ -296,87 +305,59 @@ TOOL_SCHEMA_OVERRIDE='{
 
 对于简单格式，可以不配置 `TOOL_SCHEMA_OVERRIDE`，Dify 会自动生成 JSON Schema。
 
----
+> 💡 **提示**：需要在 `TOOL_ALLOWLIST` 中添加对应的命令名称，如 `'["天气"]'`。
 
-#### 示例 3：群管插件
-
-假设安装了群管插件，可让 AI 执行禁言、踢人等操作：
-
-```json
-{
-  "mute": {
-    "description": "禁言群成员。仅在管理员明确要求时使用。",
-    "parameters": {
-      "type": "object",
-      "properties": {
-        "user_id": {
-          "type": "string",
-          "description": "要禁言的用户 QQ 号"
-        },
-        "duration": {
-          "type": "integer",
-          "description": "禁言时长（分钟），0 表示解除禁言"
-        }
-      },
-      "required": ["user_id", "duration"]
-    },
-    "format": "/mute {user_id} {duration}",
-    "allowed_users": [
-      "onebotv11+123456+123456789",
-    ]
-  },
-  "kick": {
-    "description": "踢出群成员。仅在管理员明确要求时使用。",
-    "parameters": {
-      "type": "object",
-      "properties": {
-        "user_id": {
-          "type": "string",
-          "description": "要踢出的用户 QQ 号"
-        }
-      },
-      "required": ["user_id"]
-    },
-    "format": "/kick {user_id}",
-    "allowed_users": [
-      "onebotv11+123456+123456789",
-    ]
-  }
-}
-```
-
-> ⚠️ **安全提示**：群管类工具请谨慎配置，建议在 Dify 后台的 System Prompt 中明确限制使用场景。
+**对话示例**：
+> 用户：北京天气怎么样
+>
+> Bot (思考中): 识别到工具调用 `天气`...
+>
+> Bot: (调用工具 `/天气 北京`) ... 北京今天晴...
 
 ---
 
-#### 示例 4：多命令格式
+#### 示例 3：nonebot_plugin_mcpclient (MCP 集成)
 
-对于复杂的命令行参数格式：
+使用 [nonebot-plugin-mcpclient](https://github.com/gsskk/nonebot-plugin-mcpclient) 插件，可将 MCP 服务器暴露给 Dify 智能体调用。
 
-```json
-{
-  "translate": {
-    "description": "翻译文本到指定语言",
+
+为了让 nonebot-plugin-dify 的 LLM 知道如何使用这些工具，你需要在 `.env` 中配置 `TOOL_SCHEMA_OVERRIDE`，**显式告诉 LLM 有哪些服务器和工具可用**。
+
+```env
+TOOL_ENABLE=True
+TOOL_ALLOWLIST='["mcp"]'
+TOOL_SCHEMA_OVERRIDE='{
+  "mcp": {
+    "description": "调用 MCP 工具。支持以下服务器和能力：\n1. 麦当劳 (server: mcd)\n   - campaign-calender: 查询活动日历\n   - available-coupons: 查可领优惠券\n   - auto-bind-coupons: 一键领取所有券\n   - my-coupons: 查我的优惠券\n   - now-time-info: 获取当前时间\n\n2. GitHub (server: github)\n   - search_issues: 搜索 Issue\n   - read_file: 读取文件",
     "parameters": {
       "type": "object",
       "properties": {
-        "text": {
+        "server": {
           "type": "string",
-          "description": "要翻译的文本"
+          "description": "MCP 服务器名，例如：mcd, github",
+          "enum": ["mcd", "github"]
         },
-        "from_lang": {
+        "tool": {
           "type": "string",
-          "description": "源语言代码，如 en、zh、ja"
+          "description": "工具名称，例如：campaign-calender, available-coupons"
         },
-        "to_lang": {
+        "args": {
           "type": "string",
-          "description": "目标语言代码，如 en、zh、ja"
+          "description": "工具参数，视具体工具而定。无参数工具传空字符串。"
         }
       },
-      "required": ["text", "to_lang"]
+      "required": ["server", "tool"]
     },
-    "format": "/translate --from {from_lang} --to {to_lang} {text}"
+    "format": "/mcp {server} {tool} {args}"
   }
-}
+}'
 ```
+
+**对话示例**：
+> 用户：看看麦当劳有什么优惠券
+>
+> Bot (思考中): 识别到工具调用 `mcp`...
+>
+> Bot: (调用工具 `/mcp mcd available-coupons ""`) ... 您好，当前麦当劳有以下优惠...
+
 
