@@ -464,12 +464,32 @@ async def handle_message(bot: Bot, event: Event):
 
             # 检测是否显式@（消息中包含 At 段落且目标是 bot）
             # 用于区分昵称触发和真正的@，昵称触发时回复不带@
+            # 注意：不能使用 uni_msg，因为 NoneBot 会把已触发的 @ 从 message 中移除
+            # 必须使用 original_message 来检测
             is_explicit_at = False
-            if uni_msg.has(alconna.At):
-                for seg in uni_msg[alconna.At]:
-                    if str(seg.target) == str(bot.self_id):
-                        is_explicit_at = True
-                        break
+            if hasattr(event, "original_message") and event.original_message:
+                try:
+                    original_uni_msg = await alconna.UniMessage.generate(message=event.original_message, bot=bot)
+                    if original_uni_msg.has(alconna.At):
+                        for seg in original_uni_msg[alconna.At]:
+                            if str(seg.target) == str(bot.self_id):
+                                is_explicit_at = True
+                                break
+                except Exception as e:
+                    logger.debug(f"Failed to parse original_message for At detection: {e}")
+                    # Fallback: 如果无法解析 original_message，使用 uni_msg
+                    if uni_msg.has(alconna.At):
+                        for seg in uni_msg[alconna.At]:
+                            if str(seg.target) == str(bot.self_id):
+                                is_explicit_at = True
+                                break
+            else:
+                # Fallback for adapters without original_message
+                if uni_msg.has(alconna.At):
+                    for seg in uni_msg[alconna.At]:
+                        if str(seg.target) == str(bot.self_id):
+                            is_explicit_at = True
+                            break
 
             # 备用at检查，应对is_tome()在某些情况下失效
             if not is_mentioned and is_explicit_at:
