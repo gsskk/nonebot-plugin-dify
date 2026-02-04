@@ -80,8 +80,8 @@
 
 | 配置项 | 必填 | 默认值 | 说明 |
 |:-----:|:----:|:---:|:---|
-| GROUP_CHAT_HISTORY_LIMIT | 否 | 10 | 个性化回复时在群聊中获取最近消息记录的条数 |
-| GROUP_CHAT_HISTORY_SIZE | 否 | 1024 | 个性化回复时在群聊中获取最近消息记录的最大长度 |
+| GROUP_CHAT_HISTORY_LIMIT | 否 | 50 | 个性化回复时在群聊中获取最近消息记录的条数 |
+| GROUP_CHAT_HISTORY_SIZE | 否 | 2048 | 个性化回复时在群聊中获取最近消息记录的最大长度 |
 
 ## 用户画像
 
@@ -91,15 +91,54 @@
 | PRIVATE_PROFILER_WORKFLOW_API_KEY | 否 | | 用于生成私聊个人画像的Dify工作流API Key，如不配置则默认使用PROFILER_WORKFLOW_API_KEY |
 | PROFILER_SCHEDULE | 否 | 0 3 * * * | 执行群组画像和个性化要求生成的定时任务触发器，默认为每天凌晨3点 |
 | PROFILER_SCHEDULE_JITTER | 否 | 10 | 在计划开始后，将任务随机分布在多少分钟内执行，0表示禁用 |
-| PROFILER_HISTORY_LIMIT | 否 | 50 | 生成画像时分析的最近历史记录条数 |
+| PROFILER_HISTORY_LIMIT | 否 | 100 | 生成画像时分析的最近历史记录条数 |
 | PROFILER_MIN_MESSAGES | 否 | 10 | 生成画像所需的最少有效消息条数 |
-| PROFILER_CHAT_HISTORY_SIZE | 否 | 1024 | 生成画像允许的聊天消息的最大长度 |
+| PROFILER_CHAT_HISTORY_SIZE | 否 | 10240 | 生成画像允许的聊天消息的最大长度 |
 
-## 个性化设置
+## 核心人设 (Core Persona)
+
+系统通过 `~/.local/share/nonebot2/nonebot_plugin_dify/core_persona.yaml` 文件定义不可变的 Bot 人设。
 
 | 配置项 | 必填 | 默认值 | 说明 |
 |:-----:|:----:|:---:|:---|
-| DEFAULT_PERSONALIZATION | 否 | "你叫喵喵，是一位..." | 当群组首次启用画像功能时，应用的默认个性化描述 |
+| CORE_PERSONA_DEFAULT | 否 | (傲娇猫娘配置) | Core Persona 默认配置。此环境变量**仅在首次初始化**（即 `core_persona.yaml` 不存在时）有效，用于生成默认配置文件。建议使用双引号包裹的多行字符串格式。 |
+
+### 群组/私聊覆盖配置
+
+除了全局 `core_persona.yaml`，你还可以为特定群组或私聊用户设置不同的 Bot 人设：
+
+- **群组覆盖**: `~/.local/share/nonebot2/nonebot_plugin_dify/group_core_personas.yaml`
+- **私聊覆盖**: `~/.local/share/nonebot2/nonebot_plugin_dify/private_core_personas.yaml`
+
+> 💡 **提示**：首次使用时，系统会自动生成带注释的空模板文件，无需手动创建。
+
+**群组覆盖示例** (`group_core_personas.yaml`):
+
+```yaml
+# 按 adapter+group_id 格式配置
+qq+123456789:
+  identity:
+    name: "技术讨论群助手"
+    role: "专业的技术问答助手"
+  core_rules:
+    - "回答时引用权威技术文档"
+    - "使用专业术语，假设用户有技术背景"
+```
+
+**私聊覆盖示例** (`private_core_personas.yaml`):
+
+```yaml
+# 按 adapter+user_id 格式配置
+qq+987654321:
+  identity:
+    name: "个人助理小艾"
+    role: "专属个人助理"
+  core_rules:
+    - "记住用户的偏好和习惯"
+    - "使用亲切的语气"
+```
+
+**优先级**：群组/私聊覆盖 > 全局配置
 
 ## 私聊设置
 

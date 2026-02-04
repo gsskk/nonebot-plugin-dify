@@ -361,6 +361,14 @@ class DifyBot:
 
         # --- Construct Context Block using XML ---
         context_parts = []
+
+        # 注入核心人设（最高优先级）
+        from ..storage.core_persona import get_group_core_persona
+
+        core_persona = get_group_core_persona(adapter_name, group_id)
+        if core_persona:
+            context_parts.append(f"<core_persona>\n{core_persona}\n</core_persona>")
+
         if group_profile_str:
             context_parts.append(group_profile_str.strip())  # group_profile_str already contains tags if not empty?
             # Wait, existing code: group_profile_str = f"<group_profile>\n{group_profile}\n</group_profile>\n"
@@ -471,6 +479,13 @@ class DifyBot:
 
             # --- 组合最终查询 ---
             context_parts = []
+
+            # 注入核心人设（最高优先级）
+            from ..storage.core_persona import get_private_core_persona
+
+            core_persona = get_private_core_persona(adapter_name, user_id)
+            if core_persona:
+                context_parts.append(f"<core_persona>\n{core_persona}\n</core_persona>")
 
             if sender_persona_str:
                 context_parts.append(sender_persona_str)

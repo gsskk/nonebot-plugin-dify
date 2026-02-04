@@ -101,6 +101,14 @@ class UserMemoryManager:
         Returns:
             str: XML formatted input for the Dify workflow
         """
+        # 获取核心人设（带锁定标记）
+        from ..storage.core_persona import get_core_persona_for_profiler
+
+        core_persona = get_core_persona_for_profiler(adapter_name=self.adapter_name, user_id=user_id)
+        core_persona_xml = ""
+        if core_persona:
+            core_persona_xml = f"<core_persona>\n{core_persona}\n</core_persona>\n\n"
+
         # Get existing user profile and personalization data
         old_user_profile = user_profile_memory.get(self.adapter_name, user_id)
         old_personalization = user_personalization_memory.get(self.adapter_name, user_id)
@@ -118,9 +126,9 @@ class UserMemoryManager:
         user_history_str = limit_private_chat_history_length(user_messages, plugin_config.private_chat_history_size)
         bot_history_str = limit_private_chat_history_length(bot_messages, plugin_config.private_chat_history_size)
 
-        # Build XML structure similar to group chat but for individual user
+        # Build XML structure similar to group chat but for individual user (core_persona at the beginning)
         xml_input = f"""<context>
-<user_profile>
+{core_persona_xml}<user_profile>
 {old_user_profile}
 </user_profile>
 

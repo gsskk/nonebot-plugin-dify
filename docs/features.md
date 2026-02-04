@@ -124,6 +124,9 @@ User Prompt 保持不变，它唯一的职责就是作为传递上下文的载�
         **Group Context:**
         ```xml
         <context>
+          <core_persona>[LOCKED - DO NOT MODIFY IN personalization_summary]
+          ...bot identity and immutable rules...
+          </core_persona>
           <group_profile>...</group_profile>
           <user_profiles>...</user_profiles>
           <chat_history>...</chat_history>
@@ -137,6 +140,9 @@ User Prompt 保持不变，它唯一的职责就是作为传递上下文的载�
         **Individual User Context:**
         ```xml
         <context>
+          <core_persona>[LOCKED - DO NOT MODIFY IN personalization_summary]
+          ...bot identity and immutable rules...
+          </core_persona>
           <user_profile>...</user_profile>
           <user_messages>...</user_messages>
           <bot_responses>...</bot_responses>
@@ -166,14 +172,15 @@ User Prompt 保持不变，它唯一的职责就是作为传递上下文的载�
 
         # Instructions
         1.  **Context Detection**: Identify if the input is for a Group or an Individual User by checking for `<group_profile>` or `<user_profile>`.
-        2.  **Profile Update**:
+        2.  **Core Persona Handling**: The `<core_persona>` tag contains LOCKED content that defines the bot's immutable identity. **DO NOT** include any content from `<core_persona>` in your `personalization_summary` output. The `personalization_summary` should only contain user-requested preferences and adjustments, never core identity rules.
+        3.  **Profile Update**:
             - If Group: Analyze `<group_profile>` and `<chat_history>` to update `group_profile`.
             - If Individual: Analyze `<user_profile>`, `<user_messages>`, and `<bot_responses>` to update `user_profile`.
-        3.  **Member Personas (Group only)**: Analyze `<user_profiles>` and `<chat_history>` to update member personas in the `user_profiles` list.
-        4.  **Personalization**: Analyze the `<personalization>` content to generate an updated `personalization_summary`.
-        5.  **JSON Output**: Ensure the output is a raw JSON object. Use empty strings for irrelevant fields.
-        6.  If there's insufficient new information, you can return the previous summary or an empty string for that specific field.
-        7.  Ensure the final output is a raw JSON object without any markdown formatting.
+        4.  **Member Personas (Group only)**: Analyze `<user_profiles>` and `<chat_history>` to update member personas in the `user_profiles` list.
+        5.  **Personalization**: Analyze the `<personalization>` content to generate an updated `personalization_summary`. Remember: personalization is about how to respond to demands, NOT about core identity.
+        6.  **JSON Output**: Ensure the output is a raw JSON object. Use empty strings for irrelevant fields.
+        7.  If there's insufficient new information, you can return the previous summary or an empty string for that specific field.
+        8.  Ensure the final output is a raw JSON object without any markdown formatting.
 
         # Generate the JSON object now.
         ````

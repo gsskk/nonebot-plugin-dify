@@ -62,19 +62,12 @@ def _write_status():
 
 
 def set_profiler_status(adapter_name: str, group_id: str, status: bool):
-    """设置指定群组的画像功能状态，并在启用时应用默认个性化"""
+    """设置指定群组的画像功能状态"""
     _load_status_if_needed()
     # 明确检查 _status_cache 是否为字典，以满足类型检查器
     if isinstance(_status_cache, dict):
         _status_cache[f"{adapter_name}+{group_id}"] = status
         _write_status()
-
-        # 当启用画像功能且配置了默认个性化时，应用它
-        if status and plugin_config.default_personalization:
-            # 只有在当前没有个性化设置时才应用默认值
-            if not personalization_memory.get(adapter_name, group_id):
-                logger.info(f"为群组 {group_id} 启用画像功能，并设置默认个性化。")
-                personalization_memory.set(adapter_name, group_id, plugin_config.default_personalization)
 
 
 def get_profiler_status(adapter_name: str, group_id: str) -> bool:
@@ -104,6 +97,14 @@ class GroupMemoryManager:
 
     async def _build_xml_input(self, group_id: str) -> str:
         """构建发送给 Dify Workflow 的 XML 输入"""
+        # 获取核心人设（带锁定标记）
+        from ..storage.core_persona import get_core_persona_for_profiler
+
+        core_persona = get_core_persona_for_profiler(self.adapter_name, group_id)
+        core_persona_xml = ""
+        if core_persona:
+            core_persona_xml = f"<core_persona>\n{core_persona}\n</core_persona>\n\n"
+
         # 获取旧的群组画像和个性化要求
         old_group_profile = group_profile_memory.get(self.adapter_name, group_id)
         old_personalization = personalization_memory.get(self.adapter_name, group_id)
@@ -149,9 +150,9 @@ class GroupMemoryManager:
         chat_history_str = limit_chat_history_length(chat_lines, plugin_config.profiler_chat_history_size)
         at_bot_messages_str = limit_chat_history_length(at_bot_lines, plugin_config.profiler_chat_history_size)
 
-        # 构建 XML 结构
+        # 构建 XML 结构（core_persona 在最开头）
         xml_input = f"""<context>
-<group_profile>
+{core_persona_xml}<group_profile>
 {old_group_profile}
 </group_profile>
 

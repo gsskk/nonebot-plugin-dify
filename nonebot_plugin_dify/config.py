@@ -102,10 +102,10 @@ class Config(BaseModel):
     """压缩后的最大长边分辨率（像素）。默认 1500"""
 
     # Group & User Profiling
-    group_chat_history_limit: int = 10
+    group_chat_history_limit: int = 50
     """个性化回复时在群聊中获取最近消息记录的条数"""
 
-    group_chat_history_size: int = 1024
+    group_chat_history_size: int = 2048
     """个性化回复时在群聊中获取最近消息记录的最大长度"""
 
     profiler_workflow_api_key: str = ""
@@ -114,13 +114,13 @@ class Config(BaseModel):
     private_profiler_workflow_api_key: str = ""
     """用于生成私聊个人画像的Dify工作流API Key，如不配置则默认使用PROFILER_WORKFLOW_API_KEY"""
 
-    profiler_history_limit: int = 50
+    profiler_history_limit: int = 100
     """生成画像时分析的最近历史记录条数"""
 
     profiler_min_messages: int = 10
     """生成画像所需的最少有效消息条数"""
 
-    profiler_chat_history_size: int = 1024
+    profiler_chat_history_size: int = 10240
     """生成画像允许的聊天消息的最大长度"""
 
     profiler_schedule: str = "0 3 * * *"
@@ -129,17 +129,33 @@ class Config(BaseModel):
     profiler_schedule_jitter: int = 10
     """在计划开始后，将任务随机分布在多少分钟内执行，0表示禁用"""
 
-    default_personalization: str = "你叫喵喵，是一位有点傲娇的猫娘，说话时偶尔在句末加'喵~'，但只在心情好时才会这样。你说话简洁直接，不过偶尔会露出一丝可爱。请保持回答简短，不做多余描写，不添加动作或旁白。"
-    """当群组首次启用画像功能时，应用的默认个性化描述"""
+    core_persona_default: str = """identity:
+  name: "喵喵"
+  role: "傲娇猫娘"
+  master: "主人"
+  speaking_style: "偶尔用喵语气词，保持傲娇"
+
+core_rules:
+  - "回复结尾可带'喵~'等猫娘语气词"
+  - "称呼主人时用'主人'"
+  - "保持回复简洁，不超过 200 字"
+  - "遇到技术问题时切换到专业模式，但仍保持人设"
+
+never_do:
+  - "不要自称 AI、机器人或语言模型"
+  - "不要使用'作为一个 AI'等破坏沉浸感的表达"
+  - "不要完全放弃猫娘人设"
+"""
+    """Core Persona 默认配置 (YAML格式)，当 core_persona.yaml 不存在时作为默认回退"""
 
     # Private Chat Settings
     private_personalization_enable: bool = False
     """是否启用私聊个性化功能，默认为False"""
 
-    private_chat_history_limit: int = 20
+    private_chat_history_limit: int = 100
     """私聊个性化回复时获取最近消息记录的条数"""
 
-    private_chat_history_size: int = 2048
+    private_chat_history_size: int = 20000
     """私聊个性化回复时获取最近消息记录的最大长度"""
 
     private_profiler_min_messages: int = 15
