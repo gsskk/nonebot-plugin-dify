@@ -118,13 +118,9 @@ class UserMemoryManager:
         start_time = datetime.now() - timedelta(hours=24)
         all_messages = await get_messages_since_private(self.adapter_name, user_id, start_time)
 
-        # Separate user messages and bot responses for analysis
-        user_messages = [msg for msg in all_messages if msg.get("role") == "user"]
-        bot_messages = [msg for msg in all_messages if msg.get("role") == "assistant"]
-
         # Limit message history length to prevent API limits
-        user_history_str = limit_private_chat_history_length(user_messages, plugin_config.private_chat_history_size)
-        bot_history_str = limit_private_chat_history_length(bot_messages, plugin_config.private_chat_history_size)
+        # Use simple string formatting for each message, similar to group chat
+        chat_history_str = limit_private_chat_history_length(all_messages, plugin_config.private_chat_history_size)
 
         # Build XML structure similar to group chat but for individual user (core_persona at the beginning)
         xml_input = f"""<context>
@@ -132,20 +128,16 @@ class UserMemoryManager:
 {old_user_profile}
 </user_profile>
 
-<user_messages>
-{user_history_str}
-</user_messages>
-
-<bot_responses>
-{bot_history_str}
-</bot_responses>
+<chat_history>
+{chat_history_str}
+</chat_history>
 
 <personalization>
 <previous>
 {old_personalization}
 </previous>
 <recent_interactions>
-{user_history_str}
+{chat_history_str}
 </recent_interactions>
 </personalization>
 </context>"""
