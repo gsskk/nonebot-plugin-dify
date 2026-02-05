@@ -11,6 +11,7 @@ from nonebot.log import logger
 
 from ..config import config
 from ..utils.validation import DataValidator, DataValidationError
+from ..utils.prompt_utils import simplify_time
 
 # Use an asyncio Lock to prevent concurrent file write conflicts
 _file_lock = asyncio.Lock()
@@ -415,12 +416,14 @@ def limit_private_chat_history_length(messages: List[Dict], max_length: int) -> 
     for msg in reversed(messages):  # Start from most recent
         # Format message line
         timestamp = msg.get("timestamp", "")
+        formatted_time = simplify_time(timestamp)
+
         role = msg.get("role", "unknown")
         nickname = msg.get("nickname", "Unknown")
         message = msg.get("message", "")
 
         # Build line with optional image marker
-        line = f"[{timestamp}] {role.upper()} {nickname}: "
+        line = f"[{formatted_time}] {role.upper()} {nickname}: "
 
         # Handle image markers based on history_image_mode
         if msg.get("has_image") and config.history_image_mode != "none":

@@ -96,7 +96,7 @@ User Prompt 保持不变，它唯一的职责就是作为传递上下文的载�
 
 ---
 
-#### 2. 配置画像分析工作流
+#### 2. 配置群聊画像分析工作流
 
 这个应用**必须**是一个独立的 **工作流 (Workflow)** 应用，专门用于在后台处理由插件定时发送的群聊数据。
 
@@ -104,97 +104,112 @@ User Prompt 保持不变，它唯一的职责就是作为传递上下文的载�
 
 1.  **创建工作流**:
     -   在 Dify 中创建一个新的**工作流**应用。
-    -   **开始节点**: 添加一个名为 `text` 的 `String` 类型输入变量。这个变量将接收插件发送的 XML 格式数据。
-    -   **LLM 节点**: 将 `text` 变量作为输入。
+    -   **开始节点**: 添加一个名为 `query` 的 `String` 类型输入变量。
+    -   **LLM 节点**: 将 `query` 变量作为输入。
     -   **结束节点**: 将 LLM 节点的输出连接到结束节点。
 
 2.  **配置 LLM 节点**:
-    -   在 LLM 节点的"提示词"部分，将其拆分为"系统提示词"和"用户输入"。
-    -   **系统提示词 (System Prompt)**: 复制并粘贴以下模板。它定义了 AI 的角色、任务和输出格式。
+    -   **系统提示词 (System Prompt)**:
         ````text
         # 角色
-        你是一位对话分析、群组画像构建以及总结用户个性化请求的专家。
-        
+        你是一位对话分析、群体画像和用户行为建模专家。
+
         # 任务
-        基于用户提示中提供的上下文，更新画像（群组或个人），识别行为模式，并总结新的个性化请求。你的输出必须是一个单一的、有效的 JSON 对象。
+        根据提供的群聊上下文，更新群体画像、总结成员特征并提取个性化请求。输出**必须**是原始 JSON 对象。
 
         # 输入格式
-        用户提示将包含一个 XML 格式的上下文。它可能是群组上下文或个人用户上下文：
-
-        **群组上下文 (Group Context):**
         ```xml
         <context>
-          <core_persona>[锁定 - 请勿在 personalization_summary 中修改]</core_persona>
-          ...机器人身份和不可变规则...
-          <group_profile>...</group_profile>
-          <user_profiles>...</user_profiles>
-          <chat_history>...</chat_history>
+          <core_persona>[锁定 - 请勿修改]</core_persona>
+          <group_profile>(旧的群组画像内容)</group_profile>
+          <user_profiles>(现有群成员画像列表)</user_profiles>
+          <chat_history>(最近的群聊消息记录)</chat_history>
           <personalization>
-            <previous>...</previous>
-            <new_at_messages>...</new_at_messages>
-          </personalization>
-        </context>
-        ```
-
-        **个人用户上下文 (Individual User Context):**
-        ```xml
-        <context>
-          <core_persona>[锁定 - 请勿在 personalization_summary 中修改]</core_persona>
-          ...机器人身份和不可变规则...
-          <user_profile>...</user_profile>
-          <chat_history>...</chat_history>
-          <personalization>
-            <previous>...</previous>
-            <recent_interactions>...</recent_interactions>
+            <previous>(旧的个性化要求总结)</previous>
+            <new_at_messages>(最近被@的消息上下文)</new_at_messages>
           </personalization>
         </context>
         ```
 
         # 输出 JSON Schema
-        你的输出必须是一个单一的、有效的 JSON 对象。该 JSON 对象必须符合以下结构：
         ```json
         {
-          "group_profile": "<更新后的群组画像文本，如果是个人上下文则忽略>",
-          "user_profile": "<更新后的个人用户画像文本，如果是群组上下文则忽略>",
-          "personalization_summary": "<更新后的个性化总结文本>",
+          "group_profile": "<更新后的群组氛围和话题描述>",
+          "personalization_summary": "<更新后的个性化行为要求摘要>",
           "user_profiles": [
-            {
-              "user_id": "<ID>",
-              "persona": ["标签1", "标签2"],
-              "is_bot": false
-            }
+            {"user_id": "<ID>", "persona": ["标签1", "标签2"], "is_bot": false}
           ]
         }
         ```
 
         # 指令
-        1.  **上下文检测**: 通过检查 `<group_profile>` 或 `<user_profile>` 来识别输入是用于群组还是个人用户。
-        2.  **核心人设处理**: `<core_persona>` 标签包含锁定的内容，定义了机器人的不可变身份。**绝不要**在你的 `personalization_summary` 输出中包含来自 `<core_persona>` 的任何内容。`personalization_summary` 应该只包含用户请求的偏好和调整，绝不包含核心身份规则。
-        3.  **画像更新**:
-            - 如果是群组：分析 `<group_profile>` 和 `<chat_history>` 来更新 `group_profile`。
-            - 如果是个人：分析 `<user_profile>` 和 `<chat_history>` 来更新 `user_profile`。
-        4.  **成员画像（仅限群组）**: 分析 `<user_profiles>` 和 `<chat_history>` 来更新 `user_profiles` 列表中的成员画像。
-        5.  **个性化**: 分析 `<personalization>` 内容以生成更新后的 `personalization_summary`。记住：个性化是关于如何响应需求，而不是关于核心身份。
-        6.  **JSON 输出**: 确保输出是一个原始的 JSON 对象。对于不相关的字段使用空字符串。
-        7.  如果没有足够的新信息，你可以返回先前的摘要或该特定字段的空字符串。
-        8.  确保最终输出是一个没有任何 markdown 格式的原始 JSON 对象。
-
-        # Create Output
-        请现在生成 JSON 对象。
+        1.  **核心人设处理**: `<core_persona>` 定义机器人的不可变身份，**绝不要**在 `personalization_summary` 中包含其内容。
+        2.  **群组画像**: 结合 `<group_profile>` 和 `<chat_history>` 更新群组氛围描述。
+        3.  **成员画像**: 分析 `<chat_history>`，为活跃用户生成不超过5个 persona 标签。如果某用户行为像机器人，设置 `is_bot` 为 true。
+        4.  **个性化**: 分析 `<personalization><new_at_messages>` 中的用户反馈来更新 `personalization_summary`。注意处理负面反馈（如"别太嘴硬"应移除该特质）。
+        5.  **JSON 输出**: 只输出纯 JSON，严禁包含 markdown 格式。
         ````
-    -   **用户输入 (User Input)**: 注意将输入字段命名为 `query`。这会将"开始"节点中接收到的完整 XML 数据作为变量传递给 LLM。
-        
-        ```
-        {{query}}
-        ```
+    -   **用户输入 (User Input)**: `{{query}}`
+
+3.  **获取凭据**:
+    -   发布工作流，在"API访问"页面获取 **API密钥**。
+    -   填入 `.env` 文件的 `PROFILER_WORKFLOW_API_KEY` 配置项。
 
 ---
 
+#### 3. 配置私聊画像分析工作流
+
+这个应用**必须**是一个独立的 **工作流 (Workflow)** 应用，专门用于在后台处理由插件定时发送的私聊数据。
+
+**操作步骤**:
+
+1.  **创建工作流**:
+    -   在 Dify 中创建一个新的**工作流**应用。
+    -   **开始节点**: 添加一个名为 `query` 的 `String` 类型输入变量。
+    -   **LLM 节点**: 将 `query` 变量作为输入。
+    -   **结束节点**: 将 LLM 节点的输出连接到结束节点。
+
+2.  **配置 LLM 节点**:
+    -   **系统提示词 (System Prompt)**:
+        ````text
+        # 角色
+        你是一位对话分析、个人行为建模和用户偏好总结方面的专家。
+
+        # 任务
+        根据提供的私聊上下文，更新用户个人画像并总结个性化偏好要求。输出**必须**是有效的 JSON 对象。
+
+        # 输入格式
+        ```xml
+        <context>
+          <core_persona>[锁定 - 请勿修改]</core_persona>
+          <user_profile>(该用户旧的个人画像)</user_profile>
+          <chat_history>(按时间排序的交替对话记录)</chat_history>
+          <personalization>
+            <previous>(旧的个人个性化偏好总结)</previous>
+            <recent_interactions>(最近互动的核心要点)</recent_interactions>
+          </personalization>
+        </context>
+        ```
+
+        # 输出 JSON Schema
+        ```json
+        {
+          "user_profile": "<更新后的个人画像文本>",
+          "personalization_summary": "<更新后的个性化偏好摘要文本>"
+        }
+        ```
+
+        # 指令
+        1.  **核心人设处理**: `<core_persona>` 定义机器人的不可变身份，**绝不要**在 `personalization_summary` 中包含其内容。
+        2.  **个人画像**: 分析 `<user_profile>` 和 `<chat_history>`，关注用户的兴趣爱好、性格特征、交流习惯、对AI的态度。
+        3.  **个性化偏好**: 分析 `<personalization>`，提取显性要求、隐性偏好和动态变化。
+        4.  **JSON 输出**: 只输出纯 JSON，严禁包含 markdown 格式。
+        ````
+    -   **用户输入 (User Input)**: `{{query}}`
+
 3.  **获取凭据**:
-    
-    -   发布你的工作流。
-    -   在"API访问"页面找到 **API密钥**。
-    -   将它填入 `.env` 文件的 `PROFILER_WORKFLOW_API_KEY` 配置项中。
+    -   发布工作流，在"API访问"页面获取 **API密钥**。
+    -   填入 `.env` 文件的 `PRIVATE_PROFILER_WORKFLOW_API_KEY` 配置项。
 
 ---
 

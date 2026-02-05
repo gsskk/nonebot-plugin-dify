@@ -14,6 +14,7 @@ from ..config import Config
 # from ..dify_client import DifyClient
 from ..storage.chat_recorder import get_messages_since, get_at_bot_messages_since, limit_chat_history_length
 from ..storage.group_store import group_profile_memory, personalization_memory, group_user_memory
+from ..utils.prompt_utils import simplify_time
 
 plugin_config = get_plugin_config(Config)
 
@@ -140,13 +141,14 @@ class GroupMemoryManager:
 
         # 将消息转换为可读的字符串格式
         chat_lines = [
-            f"[{msg['timestamp']}] {msg.get('nickname', 'user')}({msg['user_id']}): {msg['message']}"
+            f"[{simplify_time(msg['timestamp'])}] {msg.get('nickname', 'user')}({msg['user_id']}): {msg['message']}"
             for msg in all_chat_messages
         ]
         at_bot_lines = [
-            f"[{msg['timestamp']}] {msg.get('nickname', 'user')}({msg['user_id']}): {msg['message']}"
+            f"[{simplify_time(msg['timestamp'])}] {msg.get('nickname', 'user')}({msg['user_id']}): {msg['message']}"
             for msg in at_bot_messages
         ]
+
         chat_history_str = limit_chat_history_length(chat_lines, plugin_config.profiler_chat_history_size)
         at_bot_messages_str = limit_chat_history_length(at_bot_lines, plugin_config.profiler_chat_history_size)
 
@@ -183,6 +185,14 @@ class GroupMemoryManager:
             start_time = datetime.now() - timedelta(hours=24)
             all_chat_messages = await get_messages_since(self.adapter_name, str(group_id), start_time)
             nicknames = {str(msg["user_id"]): msg.get("nickname", "") for msg in all_chat_messages}
+
+            # 检查消息数量是否满足最低要求
+            if len(all_chat_messages) < plugin_config.profiler_min_messages:
+                logger.info(
+                    f"群组 {self.adapter_name}+{group_id} 只有 {len(all_chat_messages)} 条消息，"
+                    f"不满足最少 {plugin_config.profiler_min_messages} 条的要求，跳过画像更新"
+                )
+                return
 
             xml_input = await self._build_xml_input(group_id)
             # logger.debug(f"发送给 Dify Workflow 的输入：\n{xml_input}")
