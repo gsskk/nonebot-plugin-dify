@@ -144,8 +144,9 @@ class GroupMemoryManager:
             f"[{simplify_time(msg['timestamp'])}] {msg.get('nickname', 'user')}({msg['user_id']}): {msg['message']}"
             for msg in all_chat_messages
         ]
+        # 为 @bot 的消息添加 [AT_BOT] 标记，便于 workflow 准确识别
         at_bot_lines = [
-            f"[{simplify_time(msg['timestamp'])}] {msg.get('nickname', 'user')}({msg['user_id']}): {msg['message']}"
+            f"[{simplify_time(msg['timestamp'])}] {msg.get('nickname', 'user')}({msg['user_id']})[AT_BOT]: {msg['message']}"
             for msg in at_bot_messages
         ]
 
