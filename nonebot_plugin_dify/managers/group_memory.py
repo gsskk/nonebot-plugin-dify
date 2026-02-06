@@ -96,8 +96,17 @@ class GroupMemoryManager:
     def _get_headers(self):
         return {"Authorization": f"Bearer {plugin_config.profiler_workflow_api_key}"}
 
-    async def _build_xml_input(self, group_id: str) -> str:
-        """构建发送给 Dify Workflow 的 XML 输入"""
+    async def _build_xml_input(
+        self, group_id: str, start_time: Optional[datetime] = None, end_time: Optional[datetime] = None
+    ) -> str:
+        """
+        构建发送给 Dify Workflow 的 XML 输入
+
+        Args:
+            group_id: 群组ID
+            start_time: 开始时间，默认为24小时前
+            end_time: 结束时间，默认为当前时间
+        """
         # 获取核心人设（带锁定标记）
         from ..storage.core_persona import get_core_persona_for_profiler
 
@@ -110,11 +119,18 @@ class GroupMemoryManager:
         old_group_profile = group_profile_memory.get(self.adapter_name, group_id)
         old_personalization = personalization_memory.get(self.adapter_name, group_id)
 
-        # 获取过去24小时的群聊记录
-        # 考虑到定时任务通常每天运行，获取过去24小时的记录是合理的
-        start_time = datetime.now() - timedelta(hours=24)
-        all_chat_messages = await get_messages_since(self.adapter_name, str(group_id), start_time)
-        at_bot_messages = await get_at_bot_messages_since(self.adapter_name, str(group_id), start_time, self.bot_name)
+        # 获取指定时间窗口的群聊记录
+        # 如果未指定 end_time，则默认为当前时间
+        if not end_time:
+            end_time = datetime.now()
+        # 如果未指定 start_time，则默认为 end_time 前24小时
+        if not start_time:
+            start_time = end_time - timedelta(hours=24)
+
+        all_chat_messages = await get_messages_since(self.adapter_name, str(group_id), start_time, end_time)
+        at_bot_messages = await get_at_bot_messages_since(
+            self.adapter_name, str(group_id), start_time, self.bot_name, end_time
+        )
 
         # 提取聊天记录中涉及的用户 ID 和昵称并获取其现有画像
         involved_users = {}
@@ -178,13 +194,21 @@ class GroupMemoryManager:
 </context>"""
         return xml_input
 
-    async def update_group_memory(self, group_id: str):
+    async def update_group_memory(
+        self, group_id: str, start_time: Optional[datetime] = None, end_time: Optional[datetime] = None
+    ):
         """更新群组画像和个性化要求"""
         logger.info(f"开始更新群组 {self.adapter_name}+{group_id} 的画像和个性化要求...")
         try:
-            # 获取过去24小时的聊天记录以提取昵称
-            start_time = datetime.now() - timedelta(hours=24)
-            all_chat_messages = await get_messages_since(self.adapter_name, str(group_id), start_time)
+            # 如果未指定 end_time，则默认为当前时间
+            if not end_time:
+                end_time = datetime.now()
+            # 如果未指定 start_time，则默认为 end_time 前24小时
+            if not start_time:
+                start_time = end_time - timedelta(hours=24)
+
+            # 获取指定时间段的聊天记录以提取昵称
+            all_chat_messages = await get_messages_since(self.adapter_name, str(group_id), start_time, end_time)
             nicknames = {str(msg["user_id"]): msg.get("nickname", "") for msg in all_chat_messages}
 
             # 检查消息数量是否满足最低要求
@@ -195,7 +219,7 @@ class GroupMemoryManager:
                 )
                 return
 
-            xml_input = await self._build_xml_input(group_id)
+            xml_input = await self._build_xml_input(group_id, start_time, end_time)
             # logger.debug(f"发送给 Dify Workflow 的输入：\n{xml_input}")
 
             # 调用 Dify Workflow

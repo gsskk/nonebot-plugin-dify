@@ -8,7 +8,13 @@ from ..managers.group_memory import GroupMemoryManager, get_all_profiler_statuse
 from ..storage.record_manager import get_record_status
 
 
-async def process_single_group_profile(adapter_name: str, group_id: str):
+from datetime import datetime
+from typing import Optional
+
+
+async def process_single_group_profile(
+    adapter_name: str, group_id: str, start_time: Optional[datetime] = None, end_time: Optional[datetime] = None
+):
     """处理单个群组的画像和个性化要求更新"""
     try:
         bot = get_bot()
@@ -20,7 +26,9 @@ async def process_single_group_profile(adapter_name: str, group_id: str):
     # 只有开启聊天记录时才需要更新画像和个性化要求
     if get_record_status(adapter_name, group_id):
         try:
-            await GroupMemoryManager(adapter_name=adapter_name, bot_name=bot_name).update_group_memory(group_id)
+            await GroupMemoryManager(adapter_name=adapter_name, bot_name=bot_name).update_group_memory(
+                group_id, start_time, end_time
+            )
         except Exception as e:
             logger.error(f"更新群组 {adapter_name}:{group_id} 画像时出错: {e}")
     else:

@@ -1,5 +1,5 @@
 from datetime import datetime, timedelta
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 
 from nonebot.log import logger
 
@@ -60,25 +60,32 @@ async def run_private_profiling_job() -> None:
     logger.info("私聊用户画像和个性化要求生成任务完成")
 
 
-async def _filter_users_with_sufficient_history(users: List[Tuple[str, str]]) -> List[Tuple[str, str]]:
+async def _filter_users_with_sufficient_history(
+    users: List[Tuple[str, str]], start_time: Optional[datetime] = None, end_time: Optional[datetime] = None
+) -> List[Tuple[str, str]]:
     """
     Filter users who have sufficient message history for analysis.
 
     Args:
         users: List of (adapter_name, user_id) tuples
+        start_time: The starting time point (defaults to 24h ago)
+        end_time: The ending time point (defaults to now)
 
     Returns:
         List of users who meet the minimum message requirement
     """
     users_to_process = []
 
-    # Check messages from the past 24 hours (same as group chat analysis)
-    start_time = datetime.now() - timedelta(hours=24)
+    # Check messages within the time window
+    if not end_time:
+        end_time = datetime.now()
+    if not start_time:
+        start_time = end_time - timedelta(hours=24)
 
     for adapter_name, user_id in users:
         try:
-            # Get recent messages for this user
-            recent_messages = await get_messages_since_private(adapter_name, user_id, start_time)
+            # Get recent messages for this user within the time window
+            recent_messages = await get_messages_since_private(adapter_name, user_id, start_time, end_time)
 
             # Count only user messages (not bot responses) for analysis threshold
             user_messages = [msg for msg in recent_messages if msg.get("role") == "user"]
@@ -98,13 +105,17 @@ async def _filter_users_with_sufficient_history(users: List[Tuple[str, str]]) ->
     return users_to_process
 
 
-async def process_user_profiles(users: List[Tuple[str, str]]) -> None:
+async def process_user_profiles(
+    users: List[Tuple[str, str]], start_time: Optional[datetime] = None, end_time: Optional[datetime] = None
+) -> None:
     """
     Process user profile updates for a list of users using optimized batching.
     Groups users by adapter and uses efficient batch processing with proper error handling.
 
     Args:
         users: List of (adapter_name, user_id) tuples to process
+        start_time: The starting time point (optional)
+        end_time: The ending time point (optional)
     """
     # Group users by adapter to optimize processing
     adapter_groups = {}
@@ -127,7 +138,11 @@ async def process_user_profiles(users: List[Tuple[str, str]]) -> None:
             delay_between_batches = config.dify_api_batch_delay
 
             success_count, user_count = await memory_manager.batch_update_users(
-                user_ids, batch_size=batch_size, delay_between_batches=delay_between_batches
+                user_ids,
+                batch_size=batch_size,
+                delay_between_batches=delay_between_batches,
+                start_time=start_time,
+                end_time=end_time,
             )
 
             total_success += success_count

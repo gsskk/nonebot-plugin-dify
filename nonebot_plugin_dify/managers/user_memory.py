@@ -91,12 +91,16 @@ class UserMemoryManager:
             UserMemoryManager._circuit_breaker_failures = 0
             UserMemoryManager._circuit_breaker_last_failure = None
 
-    async def _build_xml_input(self, user_id: str) -> str:
+    async def _build_xml_input(
+        self, user_id: str, start_time: Optional[datetime] = None, end_time: Optional[datetime] = None
+    ) -> str:
         """
         Build XML input for Dify Workflow analysis of private chat data.
 
         Args:
             user_id: The unique user identifier
+            start_time: The starting time point (defaults to 24h ago)
+            end_time: The ending time point (defaults to now)
 
         Returns:
             str: XML formatted input for the Dify workflow
@@ -113,10 +117,13 @@ class UserMemoryManager:
         old_user_profile = user_profile_memory.get(self.adapter_name, user_id)
         old_personalization = user_personalization_memory.get(self.adapter_name, user_id)
 
-        # Get private chat messages from the past 24 hours
-        # This matches the group chat analysis pattern
-        start_time = datetime.now() - timedelta(hours=24)
-        all_messages = await get_messages_since_private(self.adapter_name, user_id, start_time)
+        # Get private chat messages within the time window
+        if not end_time:
+            end_time = datetime.now()
+        if not start_time:
+            start_time = end_time - timedelta(hours=24)
+
+        all_messages = await get_messages_since_private(self.adapter_name, user_id, start_time, end_time)
 
         # Limit message history length to prevent API limits
         # Use simple string formatting for each message, similar to group chat
@@ -202,11 +209,13 @@ class UserMemoryManager:
         logger.error(f"Failed to call Dify API after {self._max_retries} attempts", exc_info=last_exception)
         return None
 
-    async def update_user_memory(self, user_id: str) -> bool:
+    async def update_user_memory(
+        self, user_id: str, start_time: Optional[datetime] = None, end_time: Optional[datetime] = None
+    ) -> bool:
         logger.info(f"开始更新用户 {self.adapter_name}+private+{user_id} 的画像和个性化要求...")
 
         try:
-            xml_input = await self._build_xml_input(user_id)
+            xml_input = await self._build_xml_input(user_id, start_time, end_time)
 
             payload = {
                 "inputs": {"query": xml_input},
@@ -278,7 +287,12 @@ class UserMemoryManager:
             return False
 
     async def batch_update_users(
-        self, user_ids: list[str], batch_size: int = 5, delay_between_batches: float = 2.0
+        self,
+        user_ids: list[str],
+        batch_size: int = 5,
+        delay_between_batches: float = 2.0,
+        start_time: Optional[datetime] = None,
+        end_time: Optional[datetime] = None,
     ) -> Tuple[int, int]:
         """
         Update multiple users in batches to optimize API usage.
@@ -287,6 +301,8 @@ class UserMemoryManager:
             user_ids: List of user IDs to update
             batch_size: Number of users to process concurrently in each batch
             delay_between_batches: Delay in seconds between batches to avoid rate limiting
+            start_time: The starting time point (optional)
+            end_time: The ending time point (optional)
 
         Returns:
             Tuple[int, int]: (successful_updates, total_users)
@@ -305,7 +321,7 @@ class UserMemoryManager:
             logger.info(f"处理批次 {batch_num}/{total_batches} ({len(batch)} 个用户)")
 
             # Create tasks for this batch
-            tasks = [self.update_user_memory(user_id) for user_id in batch]
+            tasks = [self.update_user_memory(user_id, start_time, end_time) for user_id in batch]
 
             # Execute batch concurrently
             try:

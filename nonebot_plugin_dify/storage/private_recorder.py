@@ -270,15 +270,18 @@ async def _read_messages_from_file(file_path: Path, limit: int) -> List[Dict]:
     return messages
 
 
-async def get_messages_since_private(adapter_name: str, user_id: str, start_time: datetime) -> List[Dict]:
+async def get_messages_since_private(
+    adapter_name: str, user_id: str, start_time: datetime, end_time: Optional[datetime] = None
+) -> List[Dict]:
     """
-    Get all private chat messages since a specific time point.
+    Get all private chat messages within a specific time range.
     Will check today's and yesterday's log files.
 
     Args:
         adapter_name: The name of the chat adapter
         user_id: The unique user identifier
         start_time: The starting time point
+        end_time: The ending time point (optional)
 
     Returns:
         List[Dict]: List of message dictionaries in chronological order
@@ -329,6 +332,8 @@ async def get_messages_since_private(adapter_name: str, user_id: str, start_time
                             validated_msg = DataValidator.validate_message_data(msg)
                             msg_time = datetime.fromisoformat(validated_msg["timestamp"])
                             if msg_time >= start_time:
+                                if end_time and msg_time > end_time:
+                                    continue
                                 messages.append(validated_msg)
                         except (json.JSONDecodeError, DataValidationError, KeyError, ValueError) as e:
                             logger.warning(f"Skipping invalid message in {file_path}: {e}")

@@ -14,6 +14,8 @@ require("nonebot_plugin_apscheduler")
 
 from nonebot_plugin_apscheduler import scheduler
 
+from datetime import datetime, timedelta
+
 from .config import Config, config
 from .core.dify_bot import DifyBot
 
@@ -81,11 +83,15 @@ if config.private_personalization_enable and config.profiler_workflow_api_key:
             logger.info("没有启用个性化功能的私聊用户，任务结束。")
             return
 
+        # Calculate time window based on scheduled run time (before jitter)
+        end_time = datetime.now()
+        start_time = end_time - timedelta(hours=24)
+
         jitter_minutes = config.private_profiler_schedule_jitter
 
         if jitter_minutes <= 0:
             logger.info("Jitter被禁用，立即执行所有私聊分析任务...")
-            await process_user_profiles(enabled_users)
+            await process_user_profiles(enabled_users, start_time, end_time)
         else:
             logger.info(f"Jitter已启用，私聊分析任务将在 {jitter_minutes} 分钟内平滑执行。")
 
@@ -96,15 +102,15 @@ if config.private_personalization_enable and config.profiler_workflow_api_key:
                     adapter_groups[adapter_name] = []
                 adapter_groups[adapter_name].append(user_id)
 
-            async def _delayed_process(adapter, uids):
+            async def _delayed_process(adapter, uids, s_time, e_time):
                 delay = random.uniform(0, jitter_minutes * 60)
                 await asyncio.sleep(delay)
                 from .services.private_profiler import process_user_profiles
 
-                await process_user_profiles([(adapter, uid) for uid in uids])
+                await process_user_profiles([(adapter, uid) for uid in uids], s_time, e_time)
 
             for adapter_name, uids in adapter_groups.items():
-                asyncio.create_task(_delayed_process(adapter_name, uids))
+                asyncio.create_task(_delayed_process(adapter_name, uids, start_time, end_time))
 
     scheduler.add_job(
         _trigger_private_profiling_session,
@@ -139,18 +145,25 @@ if config.profiler_workflow_api_key:
             logger.info("没有需要分析的群组，任务结束。")
             return
 
+        # Calculate time window based on scheduled run time (before jitter)
+        end_time = datetime.now()
+        start_time = end_time - timedelta(hours=24)
+
         jitter_minutes = config.profiler_schedule_jitter
         if jitter_minutes <= 0:
             logger.info("Jitter被禁用，立即执行所有群组分析任务...")
             await asyncio.gather(
-                *[process_single_group_profile(adapter, group_id) for adapter, group_id in enabled_groups]
+                *[
+                    process_single_group_profile(adapter, group_id, start_time, end_time)
+                    for adapter, group_id in enabled_groups
+                ]
             )
         else:
             logger.info(f"Jitter已启用，群组分析任务将在 {jitter_minutes} 分钟内平滑执行。")
             for adapter, group_id in enabled_groups:
                 delay = random.uniform(0, jitter_minutes * 60)
                 await asyncio.sleep(delay)
-                asyncio.create_task(process_single_group_profile(adapter, group_id))
+                asyncio.create_task(process_single_group_profile(adapter, group_id, start_time, end_time))
 
     scheduler.add_job(
         _trigger_group_profiling_session,

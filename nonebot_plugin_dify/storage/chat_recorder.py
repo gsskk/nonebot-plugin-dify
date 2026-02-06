@@ -120,9 +120,11 @@ async def get_recent_messages(adapter_name: str, group_id: str, limit: int = 10)
     return list(reversed(messages))
 
 
-async def get_messages_since(adapter_name: str, group_id: str, start_time: datetime) -> List[Dict]:
+async def get_messages_since(
+    adapter_name: str, group_id: str, start_time: datetime, end_time: Optional[datetime] = None
+) -> List[Dict]:
     """
-    获取指定时间点之后的所有聊天记录。
+    获取指定时间段内的聊天记录。
     会检查今天和昨天的日志文件。
     """
     messages = []
@@ -147,6 +149,8 @@ async def get_messages_since(adapter_name: str, group_id: str, start_time: datet
                         msg = json.loads(line.strip())
                         msg_time = datetime.fromisoformat(msg["timestamp"])
                         if msg_time >= start_time:
+                            if end_time and msg_time > end_time:
+                                continue
                             messages.append(msg)
                     except (json.JSONDecodeError, KeyError, ValueError):
                         logger.warning(f"跳过格式错误或时间戳无效的行 {file_path}: {line}")
@@ -157,12 +161,16 @@ async def get_messages_since(adapter_name: str, group_id: str, start_time: datet
 
 
 async def get_at_bot_messages_since(
-    adapter_name: str, group_id: str, start_time: datetime, bot_name: str
+    adapter_name: str,
+    group_id: str,
+    start_time: datetime,
+    bot_name: str,
+    end_time: Optional[datetime] = None,
 ) -> List[Dict]:
     """
-    获取指定时间点之后所有 @bot 的消息记录。
+    获取指定时间段内所有 @bot 的消息记录。
     """
-    all_messages = await get_messages_since(adapter_name, group_id, start_time)
+    all_messages = await get_messages_since(adapter_name, group_id, start_time, end_time)
     at_bot_messages = []
     for msg in all_messages:
         # 检查消息是否是用户发送的，并且包含 @bot 的提及
