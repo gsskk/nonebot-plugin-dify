@@ -99,14 +99,7 @@ class GroupMemoryManager:
     async def _build_xml_input(
         self, group_id: str, start_time: Optional[datetime] = None, end_time: Optional[datetime] = None
     ) -> str:
-        """
-        构建发送给 Dify Workflow 的 XML 输入
-
-        Args:
-            group_id: 群组ID
-            start_time: 开始时间，默认为24小时前
-            end_time: 结束时间，默认为当前时间
-        """
+        """构建发送给 Dify Workflow 的 XML 输入"""
         # 获取核心人设（带锁定标记）
         from ..storage.core_persona import get_core_persona_for_profiler
 
@@ -119,13 +112,9 @@ class GroupMemoryManager:
         old_group_profile = group_profile_memory.get(self.adapter_name, group_id)
         old_personalization = personalization_memory.get(self.adapter_name, group_id)
 
-        # 获取指定时间窗口的群聊记录
-        # 如果未指定 end_time，则默认为当前时间
-        if not end_time:
-            end_time = datetime.now()
-        # 如果未指定 start_time，则默认为 end_time 前24小时
+        # 获取指定时间段或过去24小时的群聊记录
         if not start_time:
-            start_time = end_time - timedelta(hours=24)
+            start_time = datetime.now() - timedelta(hours=24)
 
         all_chat_messages = await get_messages_since(self.adapter_name, str(group_id), start_time, end_time)
         at_bot_messages = await get_at_bot_messages_since(
@@ -156,16 +145,30 @@ class GroupMemoryManager:
             user_profiles_xml = "\n".join(profiles_list)
 
         # 将消息转换为可读的字符串格式
-        chat_lines = [
-            f"[{simplify_time(msg['timestamp'])}] {msg.get('nickname', 'user')}({msg['user_id']}): {msg['message']}"
-            for msg in all_chat_messages
-        ]
+        chat_lines = []
+        for msg in all_chat_messages:
+            # Check if this message mentions the bot
+            # Note: is_mentioned is stored in the log entry by chat_recorder
+            is_at_bot = msg.get("is_mentioned", False)
+            at_bot_marker = "[AT_BOT]" if is_at_bot else ""
+
+            # Check if this is a message from the bot (role assistant)
+            # We add [IS_BOT] marker to help workflow identify bot messages without needing bot_id
+            is_bot_role = msg.get("role") == "assistant"
+            bot_marker = "[IS_BOT]" if is_bot_role else ""
+
+            chat_lines.append(
+                f"[{simplify_time(msg['timestamp'])}] {msg.get('nickname', 'user')}({msg['user_id']}){at_bot_marker}{bot_marker}: {msg['message']}"
+            )
         # 为 @bot 的消息添加 [AT_BOT] 标记，便于 workflow 准确识别
         at_bot_lines = [
             f"[{simplify_time(msg['timestamp'])}] {msg.get('nickname', 'user')}({msg['user_id']})[AT_BOT]: {msg['message']}"
             for msg in at_bot_messages
         ]
 
+        # Use limited message count for display
+        # TODO: Consider if we need to limit differently based on time window?
+        # For now, sticking to config limit but applying to the window fetched.
         chat_history_str = limit_chat_history_length(chat_lines, plugin_config.profiler_chat_history_size)
         at_bot_messages_str = limit_chat_history_length(at_bot_lines, plugin_config.profiler_chat_history_size)
 
@@ -200,12 +203,9 @@ class GroupMemoryManager:
         """更新群组画像和个性化要求"""
         logger.info(f"开始更新群组 {self.adapter_name}+{group_id} 的画像和个性化要求...")
         try:
-            # 如果未指定 end_time，则默认为当前时间
-            if not end_time:
-                end_time = datetime.now()
-            # 如果未指定 start_time，则默认为 end_time 前24小时
+            # 获取指定时间段或过去24小时的聊天记录
             if not start_time:
-                start_time = end_time - timedelta(hours=24)
+                start_time = datetime.now() - timedelta(hours=24)
 
             # 获取指定时间段的聊天记录以提取昵称
             all_chat_messages = await get_messages_since(self.adapter_name, str(group_id), start_time, end_time)

@@ -13,14 +13,19 @@ from typing import Optional
 
 
 async def process_single_group_profile(
-    adapter_name: str, group_id: str, start_time: Optional[datetime] = None, end_time: Optional[datetime] = None
+    adapter_name: str,
+    group_id: str,
+    start_time: Optional[datetime] = None,
+    end_time: Optional[datetime] = None,
 ):
     """处理单个群组的画像和个性化要求更新"""
     try:
         bot = get_bot()
         bot_name = list(bot.config.nickname)[0] if bot.config.nickname else "bot"
     except Exception:
-        logger.warning(f"无法获取 Bot 昵称，群组 {adapter_name}:{group_id} 将使用默认 'bot' 作为 Bot 名称。")
+        logger.warning(
+            f"无法获取 Bot 实例（可能是手动运行脚本），群组 {adapter_name}:{group_id} 将使用默认 'bot' 作为 Bot 名称。"
+        )
         bot_name = "bot"
 
     # 只有开启聊天记录时才需要更新画像和个性化要求
