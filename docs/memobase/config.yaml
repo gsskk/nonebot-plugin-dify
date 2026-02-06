@@ -1,0 +1,142 @@
+# =========================================
+# Memobase 服务端配置
+# =========================================
+# 文档: https://docs.memobase.io/references/full
+# 针对聊天机器人场景（私聊 + 群聊）进行了优化
+
+# =========================================
+# LLM 配置
+# =========================================
+# 示例使用兼容 OpenAI 接口的 API (如 智谱 AI, DeepSeek, OpenAI)
+llm_api_key: "YOUR-LLM-API-KEY"
+llm_base_url: "https://api.example.com/v1"
+best_llm_model: "gpt-5.2"  # 推荐使用推理能力较好的模型
+
+# =========================================
+# Embedding 配置
+# =========================================
+# 用于事件语义搜索。如果不需要此功能可禁用以节省成本。
+enable_event_embedding: true
+embedding_api_key: "YOUR-EMBEDDING-API-KEY"
+embedding_base_url: "https://api.example.com/v1"
+embedding_model: "text-embedding-3-small"
+
+# =========================================
+# 语言设置
+# =========================================
+language: zh  # 使用中文提示词进行画像提取
+
+# =========================================
+# 用户画像 Schema
+# =========================================
+# "overwrite_user_profiles" 允许完全控制画像结构。
+# 字段定义针对社交聊天机器人场景进行了优化。
+overwrite_user_profiles:
+  # === 基础信息 ===
+  - topic: "基本信息"
+    sub_topics:
+      - name: "昵称"
+        description: "用户偏好的称呼或昵称"
+      - name: "性别"
+      - name: "年龄段"
+        description: "例如：学生、上班族、中年"
+      - name: "地区"
+        description: "城市或时区"
+      - name: "职业"
+        description: "工作职位或学习领域"
+      - name: "语言"
+        description: "偏好的语言（如普通话、粤语、英语）"
+
+  # === 兴趣爱好 (社交 Bot 的核心) ===
+  - topic: "兴趣爱好"
+    sub_topics:
+      - name: "ACG"
+        description: "动漫、漫画、游戏偏好"
+      - name: "游戏"
+        description: "具体玩的游戏或游戏类型"
+      - name: "音乐"
+        description: "音乐风格或歌手"
+      - name: "影视"
+        description: "电影、电视剧"
+      - name: "技术栈"
+        description: "编程语言或工具（针对技术用户）"
+      - name: "其他爱好"
+        description: "其他兴趣爱好"
+
+  # === 交流偏好 ===
+  - topic: "交流偏好"
+    description: "用户对 AI 回复风格的偏好"
+    sub_topics:
+      - name: "回复风格"
+        description: "简洁、详细、幽默、正式等"
+      - name: "互动频率"
+        description: "喜欢频繁互动还是低频交流"
+      - name: "幽默程度"
+        description: "对玩笑/吐槽的接受程度"
+      - name: "称呼偏好"
+        description: "希望被如何称呼（如：主人、先生）"
+      - name: "敏感话题"
+        description: "应避免的话题"
+
+  # === 性格特征 ===
+  - topic: "性格特征"
+    sub_topics:
+      - name: "性格标签"
+        description: "例如：开朗、内向、傲娇"
+      - name: "沟通风格"
+        description: "直接、礼貌、或使用特定表情"
+      - name: "情绪倾向"
+        description: "一般的情绪状态"
+      - name: "对AI态度"
+        description: "将 AI 视为：工具、朋友或玩具"
+
+  # === 时序上下文 ===
+  - topic: "近期动态"
+    description: "用于保持对话连续性的近期事件"
+    sub_topics:
+      - name: "近期计划"
+        description: "用户即将要做的事情"
+      - name: "关注话题"
+        description: "当前正在讨论的话题"
+      - name: "生活状态"
+        description: "例如：上学中、工作中、度假中"
+
+# =========================================
+# 事件标签 (Event Tags)
+# =========================================
+# 用于对时间线中的事件进行分类
+event_tags:
+  - name: "情绪"
+    description: |
+      用户在对话中的情绪状态：
+      - 开心
+      - 难过
+      - 生气
+      - 焦虑
+      - 无聊
+      - 兴奋
+      - 平静
+
+  - name: "话题类型"
+    description: |
+      对话的主要话题类别：
+      - 闲聊
+      - 技术
+      - 游戏
+      - 动漫
+      - 工作
+      - 求助
+      - 吐槽
+
+# =========================================
+# Buffer 配置
+# =========================================
+# 当达到 Token 限制或时间间隔时，Buffer 会自动刷新
+max_buffer_token_size: 1024
+buffer_flush_interval: 3600  # 1 小时
+
+# =========================================
+# 输出控制
+# =========================================
+max_pre_profile_token_size: 256
+max_profile_subtopics: 10
