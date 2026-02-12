@@ -125,9 +125,23 @@ class UserMemoryManager:
 
         all_messages = await get_messages_since_private(self.adapter_name, user_id, start_time, end_time)
 
+        # Skip workflow execution if there are no messages in the time window
+        if not all_messages:
+            logger.info(f"没有新消息，跳过用户 {self.adapter_name}+private+{user_id} 的画像更新")
+            return False
+
+        # Count only user messages (not bot responses) for minimum threshold check
+        user_messages = [msg for msg in all_messages if msg.get("role") == "user"]
+        if len(user_messages) < plugin_config.private_profiler_min_messages:
+            logger.info(
+                f"用户 {self.adapter_name}+private+{user_id} 只有 {len(user_messages)} 条用户消息，"
+                f"不满足最少 {plugin_config.private_profiler_min_messages} 条的要求，跳过画像更新"
+            )
+            return False
+
         # Limit message history length to prevent API limits
-        # Use simple string formatting for each message, similar to group chat
-        chat_history_str = limit_private_chat_history_length(all_messages, plugin_config.private_chat_history_size)
+        # Use profiler_chat_history_size for profiler workflow (same as group profiler)
+        chat_history_str = limit_private_chat_history_length(all_messages, plugin_config.profiler_chat_history_size)
 
         # Build XML structure similar to group chat but for individual user (core_persona at the beginning)
         xml_input = f"""<context>

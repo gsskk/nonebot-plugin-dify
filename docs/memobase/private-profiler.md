@@ -18,7 +18,7 @@
 | **群聊** | Bot 对话 (`@Bot → Bot回复`) | Insert Data (分支 A) |
 | **群聊** | 旁观消息 (用户没@Bot的普通发言) | Add Profile (分支 B) |
 | **群聊** | 群组配置 | LLM 分析 (分支 C) |
-| **私聊** | 全部消息 (都是用户与Bot的对话) | Insert Data (分支 A) |
+| **私聊** | 全部消息 (都是用户与Bot的对话) | HTTP Request 直接调用 API (分支 A) |
 | **私聊** | 个人配置 | LLM 分析 (分支 B) |
 
 **关键区别**：
@@ -36,9 +36,9 @@ Start (接收 query 变量)
 Code Node: parse_chat_history (提取并转换)
     ↓
     ├─ [并行分支 A: 用户记忆] ────────────────────────┐
-    │   Get or Create User (Memobase)                │
+    │   Get or Create User (Memobase 插件)           │
     │       ↓                                        │
-    │   Insert Data (Memobase)                       │  → 写入 Memobase
+    │   HTTP Request: Insert Blob (直接调用 API)      │  → 写入 Memobase
     │                                                │
     └─ [并行分支 B: Bot 配置] ────────────────────────┤
         LLM Node: 个人画像分析 (原有逻辑)              │
@@ -47,6 +47,8 @@ Code Node: parse_chat_history (提取并转换)
 ```
 
 **并行执行**：两条分支同时进行，互不影响。
+
+> **关键改进**: 分支 A 使用 HTTP Request 直接调用 Memobase API，绕过 Dify 插件的单对话限制，支持传入完整的多轮 messages 数组。
 
 ---
 
@@ -177,12 +179,25 @@ def main(query: str, user: str = "") -> dict:
         for m in messages[:10]
     ])
     
+    memobase_user_id = user_id_to_uuid(adapter, user_id) if user_id != "unknown" else user_id
+    
+    # 构建 Memobase API 请求体（用于 HTTP Request 节点）
+    # 注意: 必须使用 ensure_ascii=True，否则 Dify HTTP Request 节点
+    # 发送含中文的 body 时会报 'ascii' codec 编码错误
+    insert_blob_body = json.dumps({
+        "blob_type": "chat",
+        "blob_data": {
+            "messages": messages
+        }
+    }, ensure_ascii=True)
+    
     return {
-        "user_id": user_id_to_uuid(adapter, user_id) if user_id != "unknown" else user_id,
+        "user_id": memobase_user_id,
         "original_id": user_id,
         "adapter": adapter,
         "messages": messages,
         "messages_json": json.dumps(messages, ensure_ascii=False),
+        "insert_blob_body": insert_blob_body,  # HTTP Request 请求体
         "message_count": len(messages),
         "conversation_flow": conversation_flow
     }
@@ -190,39 +205,70 @@ def main(query: str, user: str = "") -> dict:
 
 **输出变量**：
 
-| 变量名 | 类型 | 描述 | 示例值 |
-|--------|------|------|--------|
-| `user_id` | String | UUID 格式 | `11111111...` |
-| `original_id` | String | 原始用户 ID | `123456789` |
-| `adapter` | String | 适配器名称 | `onebotv11` |
-| `messages` | Array | OpenAI 兼容的 messages 数组 | `[{"role": "user", ...}]` |
-| `messages_json` | String | messages 的 JSON 字符串 | `"[{\"role\": \"user\"...}]"` |
-| `message_count` | Number | 总消息数 | `4` |
-| `conversation_flow` | String | 对话流程概览（调试用） | `U[2025-03-15] → A...` |
+| 变量名 | 类型 | 描述 |
+|--------|------|------|
+| `user_id` | String | UUID 格式的 Memobase 用户 ID |
+| `original_id` | String | 原始用户 ID |
+| `adapter` | String | 适配器名称 |
+| `messages` | Array | OpenAI 兼容的 messages 数组 |
+| `messages_json` | String | messages 的 JSON 字符串格式 |
+| `insert_blob_body` | String | **HTTP Request 请求体** (含 blob_type + blob_data) |
+| `message_count` | Number | 总消息数 |
+| `conversation_flow` | String | 对话流程概览（调试用） |
 
 ---
 
 
-## Memobase 工具配置
+## 分支 A 配置：用户记忆
 
-### 1. Get or Create User
+### 1. Get or Create User (Memobase 插件)
 - `user_id`: `{{#parse_chat_history.user_id#}}`
 
-### 2. Insert Data
+### 2. HTTP Request: Insert Blob
 
-根据 Dify Memobase 插件的实际接口，有两种配置方式：
+> **为什么不用插件？** Dify Memobase 插件的 `Insert Data` 只接受 `user_message` + `assistant_message` 两个字符串，固定创建仅含 2 条消息的 ChatBlob。私聊需要插入完整的多轮对话（8+ 条消息），因此绕过插件直接调用 Memobase API。
 
-#### 方式 A: 使用 messages 数组（推荐）
-- `user_id`: `{{#parse_chat_history.user_id#}}`
-- `messages`: `{{#parse_chat_history.messages#}}`
+**节点类型**：HTTP Request
 
-#### 方式 B: 使用 JSON 字符串
-- `user_id`: `{{#parse_chat_history.user_id#}}`
-- `blob_data`: `{{#parse_chat_history.messages_json#}}`
+**配置**：
+
+| 项目 | 值 |
+|------|----|
+| Method | `POST` |
+| URL | `http://<MEMOBASE_HOST>:8019/api/v1/blobs/insert/{{#parse_chat_history.user_id#}}` |
+| Authorization | Bearer Type: `<MEMOBASE_API_KEY>` |
+| Headers | Content-Type: `application/json` |
+| Body Type | Raw (JSON) |
+| Body | `{{#parse_chat_history.insert_blob_body#}}` |
+| Timeout | 30s |
+
+> **注意**：配置时请手动输入各字段值，避免从文档复制粘贴（可能引入不可见字符导致编码错误）。
+
+**请求体格式**（由 Code 节点自动生成）：
+```json
+{
+  "blob_type": "chat",
+  "blob_data": {
+    "messages": [
+      {"role": "user", "content": "你好", "created_at": "03-15 20:30"},
+      {"role": "assistant", "content": "你好呀！", "created_at": "03-15 20:30"},
+      {"role": "user", "content": "今天天气怎么样", "created_at": "03-15 20:31"},
+      {"role": "assistant", "content": "今天晴天~", "created_at": "03-15 20:31"}
+    ]
+  }
+}
+```
+
+**成功响应**：
+```json
+{"data": {"id": "<blob_id>", "chat_results": []}, "errno": 0, "errmsg": ""}
+```
+
+> **私聊优势**：私聊包含完整的多轮 user + assistant 交替对话，Memobase 可以最准确地提取记忆和事件。
 
 ---
 
-## LLM 节点配置 (保持原有逻辑)
+## 分支 B 配置：Bot 配置 (保持原有逻辑)
 
 ### System Prompt
 
@@ -281,13 +327,14 @@ NoneBot 私聊消息记录 (已按时间排序)
 │ 1. 提取 <chat_history> 内容                                  │
 │ 2. 解析为 OpenAI 兼容的 messages 数组                         │
 │ 3. 生成 user_id (UUID)                                       │
+│ 4. 构建 insert_blob_body (HTTP 请求体 JSON)                  │
 └─────────────────────────────────────────────────────────────┘
     ↓                              ↓
-┌─────────────┐              ┌─────────────┐
-│  分支 A     │              │  分支 B     │
-│  Insert     │              │  LLM 分析   │
-│  Data       │              │             │
-└──────┬──────┘              └──────┬──────┘
+┌──────────────┐             ┌─────────────┐
+│  分支 A      │             │  分支 B     │
+│  HTTP Req    │             │  LLM 分析   │
+│  Insert Blob │             │             │
+└──────┬───────┘             └──────┬──────┘
        ↓                            ↓
 ┌─────────────┐              ┌──────────────────┐
 │ Memobase    │              │ Return JSON      │
@@ -297,7 +344,8 @@ NoneBot 私聊消息记录 (已按时间排序)
        ↓                     ┌──────────────────┐
 ┌─────────────┐              │ personalizations │
 │ Events +    │              │     .json        │
-└─────────────┘              └──────────────────┘
+│ Profiles    │              └──────────────────┘
+└─────────────┘
 ```
 
 ---
@@ -309,6 +357,7 @@ NoneBot 私聊消息记录 (已按时间排序)
 | 用户数量 | 单用户 | 多用户 |
 | Iteration 节点 | 不需要 | 需要（遍历用户） |
 | 消息来源 | `<chat_history>` (交替) | `<chat_history>` (交替) |
+| 写入方式 | HTTP Request (完整多轮) | Insert Data 插件 (单对话对) |
 | 对话配对 | 直接使用 | 检测 @Bot → Bot reply |
 | 旁观消息处理 | 无（都是对话） | Add Profile 直接写入 |
 | UUID 命名空间 | `NAMESPACE_PRIVATE` | `NAMESPACE_GROUP` |

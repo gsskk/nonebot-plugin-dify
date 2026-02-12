@@ -114,14 +114,14 @@ class Config(BaseModel):
     private_profiler_workflow_api_key: str = ""
     """用于生成私聊个人画像的Dify工作流API Key，如不配置则默认使用PROFILER_WORKFLOW_API_KEY"""
 
-    profiler_history_limit: int = 100
-    """生成画像时分析的最近历史记录条数"""
+    profiler_history_limit: int = 300
+    """生成画像时读取的历史记录上限（性能保护）"""
 
     profiler_min_messages: int = 10
     """生成画像所需的最少有效消息条数"""
 
-    profiler_chat_history_size: int = 10240
-    """生成画像允许的聊天消息的最大长度"""
+    profiler_chat_history_size: int = 30000
+    """画像生成工作流的聊天历史最大长度（大量上下文，用于深度分析）"""
 
     profiler_schedule: str = "0 3 * * *"
     """执行群组画像生成的定时任务触发器，默认为每天凌晨3点"""

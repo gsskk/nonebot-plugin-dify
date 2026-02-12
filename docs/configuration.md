@@ -91,9 +91,9 @@
 | PRIVATE_PROFILER_WORKFLOW_API_KEY | 否 | | 用于生成私聊个人画像的Dify工作流API Key，如不配置则默认使用PROFILER_WORKFLOW_API_KEY |
 | PROFILER_SCHEDULE | 否 | 0 3 * * * | 执行群组画像和个性化要求生成的定时任务触发器，默认为每天凌晨3点 |
 | PROFILER_SCHEDULE_JITTER | 否 | 10 | 在计划开始后，将任务随机分布在多少分钟内执行，0表示禁用 |
-| PROFILER_HISTORY_LIMIT | 否 | 100 | 生成画像时分析的最近历史记录条数 |
+| PROFILER_HISTORY_LIMIT | 否 | 300 | 生成画像时读取的历史记录上限（性能保护） |
 | PROFILER_MIN_MESSAGES | 否 | 10 | 生成画像所需的最少有效消息条数 |
-| PROFILER_CHAT_HISTORY_SIZE | 否 | 10240 | 生成画像允许的聊天消息的最大长度 |
+| PROFILER_CHAT_HISTORY_SIZE | 否 | 30000 | 画像生成工作流的聊天历史最大长度（大量上下文，用于深度分析） |
 
 ## 核心人设 (Core Persona)
 
