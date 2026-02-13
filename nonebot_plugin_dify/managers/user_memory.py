@@ -92,15 +92,20 @@ class UserMemoryManager:
             UserMemoryManager._circuit_breaker_last_failure = None
 
     async def _build_xml_input(
-        self, user_id: str, start_time: Optional[datetime] = None, end_time: Optional[datetime] = None
+        self,
+        user_id: str,
+        all_messages: list,
+        start_time: Optional[datetime] = None,
+        end_time: Optional[datetime] = None,
     ) -> str:
         """
         Build XML input for Dify Workflow analysis of private chat data.
 
         Args:
             user_id: The unique user identifier
-            start_time: The starting time point (defaults to 24h ago)
-            end_time: The ending time point (defaults to now)
+            all_messages: List of messages to process
+            start_time: The starting time point (for reference)
+            end_time: The ending time point (for reference)
 
         Returns:
             str: XML formatted input for the Dify workflow
@@ -116,28 +121,6 @@ class UserMemoryManager:
         # Get existing user profile and personalization data
         old_user_profile = user_profile_memory.get(self.adapter_name, user_id)
         old_personalization = user_personalization_memory.get(self.adapter_name, user_id)
-
-        # Get private chat messages within the time window
-        if not end_time:
-            end_time = datetime.now()
-        if not start_time:
-            start_time = end_time - timedelta(hours=24)
-
-        all_messages = await get_messages_since_private(self.adapter_name, user_id, start_time, end_time)
-
-        # Skip workflow execution if there are no messages in the time window
-        if not all_messages:
-            logger.info(f"没有新消息，跳过用户 {self.adapter_name}+private+{user_id} 的画像更新")
-            return False
-
-        # Count only user messages (not bot responses) for minimum threshold check
-        user_messages = [msg for msg in all_messages if msg.get("role") == "user"]
-        if len(user_messages) < plugin_config.private_profiler_min_messages:
-            logger.info(
-                f"用户 {self.adapter_name}+private+{user_id} 只有 {len(user_messages)} 条用户消息，"
-                f"不满足最少 {plugin_config.private_profiler_min_messages} 条的要求，跳过画像更新"
-            )
-            return False
 
         # Limit message history length to prevent API limits
         # Use profiler_chat_history_size for profiler workflow (same as group profiler)
@@ -229,7 +212,29 @@ class UserMemoryManager:
         logger.info(f"开始更新用户 {self.adapter_name}+private+{user_id} 的画像和个性化要求...")
 
         try:
-            xml_input = await self._build_xml_input(user_id, start_time, end_time)
+            # Get private chat messages within the time window
+            if not end_time:
+                end_time = datetime.now()
+            if not start_time:
+                start_time = end_time - timedelta(hours=24)
+
+            all_messages = await get_messages_since_private(self.adapter_name, user_id, start_time, end_time)
+
+            # Skip workflow execution if there are no messages in the time window
+            if not all_messages:
+                logger.info(f"没有新消息，跳过用户 {self.adapter_name}+private+{user_id} 的画像更新")
+                return False
+
+            # Count only user messages (not bot responses) for minimum threshold check
+            user_messages = [msg for msg in all_messages if msg.get("role") == "user"]
+            if len(user_messages) < plugin_config.private_profiler_min_messages:
+                logger.info(
+                    f"用户 {self.adapter_name}+private+{user_id} 只有 {len(user_messages)} 条用户消息，"
+                    f"不满足最少 {plugin_config.private_profiler_min_messages} 条的要求，跳过画像更新"
+                )
+                return False
+
+            xml_input = await self._build_xml_input(user_id, all_messages, start_time, end_time)
 
             payload = {
                 "inputs": {"query": xml_input},
