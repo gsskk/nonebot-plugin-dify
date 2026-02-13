@@ -56,7 +56,8 @@ async def build_reply_message(reply_types: List[ReplyType], reply_contents: List
             _pic_content = await get_pic_from_url(_reply_content)
             _uni_message += alconna.UniMessage(alconna.Image(raw=_pic_content))
         else:
-            _uni_message += alconna.UniMessage(f"{_reply_content}")
+            # Strip leading/trailing whitespace to prevent blank lines
+            _uni_message += alconna.UniMessage(f"{_reply_content.strip()}")
 
     return _uni_message
 
@@ -160,7 +161,7 @@ async def send_reply_message(
                 )
 
                 if should_at:
-                    final_msg = alconna.UniMessage([alconna.At("user", user_id), "\n", _uni_message])
+                    final_msg = alconna.UniMessage([alconna.At("user", user_id), " ", _uni_message])
                 else:
                     final_msg = _uni_message
 
