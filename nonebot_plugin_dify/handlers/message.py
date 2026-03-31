@@ -313,13 +313,67 @@ async def handle_message(bot: Bot, event: Event):
                     _img = imgs[0]
 
                     _img_bytes = await alconna.image_fetch(event=event, bot=bot, state=T_State(), img=_img)
-                    if _img_bytes:
+
+                    # QQ/OneBot 的图片 URL 有时会因异常返回 400 等错误。
+                    # 尝试修复：通过 bot.get_image 让协议端（如 NapCat/LLOneBot）
+                    # 在 QQ 内网环境下载到本地，再由我们读取本地文件。
+                    if not _img_bytes or len(_img_bytes) < config.image_min_size:
+                        if _img_bytes:
+                            try:
+                                stub_text = _img_bytes.decode("utf-8").strip()
+                            except Exception:
+                                stub_text = str(_img_bytes[:50]) + "..."
+
+                            logger.warning(
+                                f"Replied image fetch returned only {len(_img_bytes)} bytes "
+                                f"(threshold {config.image_min_size}), content: {stub_text}. "
+                                "Trying bot.get_image fallback."
+                            )
+                        if bot.type == "OneBot V11":
+                            try:
+                                reply_msg_id = getattr(event.reply, "message_id", None)
+                                if reply_msg_id is not None:
+                                    logger.debug(f"Fallback: get_msg id={reply_msg_id} → get_image")
+                                    raw_msg_data = await bot.get_msg(message_id=reply_msg_id)
+                                    raw_message = raw_msg_data.get("message", [])
+                                    # 找到第一个 image segment，提取 file 字段
+                                    img_file = None
+                                    for seg in raw_message:
+                                        if isinstance(seg, dict) and seg.get("type") == "image":
+                                            img_file = seg.get("data", {}).get("file")
+                                            break
+                                    if img_file:
+                                        logger.debug(f"Calling get_image(file={img_file})")
+                                        img_info = await bot.get_image(file=img_file)
+                                        local_path = img_info.get("file")
+                                        if local_path and os.path.exists(local_path):
+                                            with open(local_path, "rb") as f:
+                                                _img_bytes = f.read()
+                                            logger.debug(f"Fallback succeeded via get_image: {len(_img_bytes)} bytes")
+                                        else:
+                                            logger.warning(
+                                                f"get_image returned path {local_path!r} which does not exist"
+                                            )
+                                    else:
+                                        logger.warning("No image segment found in get_msg response")
+                            except Exception as _e:
+                                logger.warning(f"Fallback (get_image) failed: {_e}")
+                                _img_bytes = None
+                        else:
+                            logger.debug(f"No fallback implemented for adapter '{bot.type}', skipping.")
+
+                    if _img_bytes and len(_img_bytes) >= config.image_min_size:
                         cache_dir = store.get_cache_dir("nonebot_plugin_dify")
                         save_dir = os.path.join(cache_dir, config.image_cache_dir)
                         replied_image_path = save_pic(_img_bytes, _img, save_dir)
                         logger.debug(f"Saved replied image to temporary path: {replied_image_path}")
+                    elif _img_bytes:
+                        logger.warning(
+                            f"Replied image still too small after fallback ({len(_img_bytes)} bytes), skipping."
+                        )
                     else:
                         logger.warning("Failed to fetch replied image bytes.")
+
             except Exception as e:
                 logger.warning(f"Failed to extract replied message: {e}")
 
