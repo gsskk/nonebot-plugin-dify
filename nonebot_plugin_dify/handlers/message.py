@@ -303,6 +303,7 @@ async def handle_message(bot: Bot, event: Event):
         # 提取被引用的消息
         replied_message = None
         replied_image_path = None
+        replied_image_failed_reason = ""
         if hasattr(event, "reply") and event.reply:
             try:
                 replied_message = await alconna.UniMessage.generate(message=event.reply.message, bot=bot)
@@ -371,8 +372,22 @@ async def handle_message(bot: Bot, event: Event):
                         logger.warning(
                             f"Replied image still too small after fallback ({len(_img_bytes)} bytes), skipping."
                         )
+                        replied_image_failed_reason = "returned stub data"
+                        try:
+                            # 尝试解析 QQ 服务器可能返回的错误 JSON (如 "download url has expired")
+                            stub_str = _img_bytes.decode("utf-8").strip()
+                            try:
+                                import json
+
+                                err_json = json.loads(stub_str)
+                                replied_image_failed_reason = err_json.get("retmsg", stub_str[:100])
+                            except Exception:
+                                replied_image_failed_reason = stub_str[:100]
+                        except Exception:
+                            pass
                     else:
                         logger.warning("Failed to fetch replied image bytes.")
+                        replied_image_failed_reason = "network error or empty data"
 
             except Exception as e:
                 logger.warning(f"Failed to extract replied message: {e}")
@@ -380,6 +395,14 @@ async def handle_message(bot: Bot, event: Event):
         # 生成统一消息对象并提取纯文本
         uni_msg = alconna.UniMessage.generate_without_reply(event=event, bot=bot)
         msg_text = uni_msg.extract_plain_text()
+
+        # 注入引用图片获取失败的系统提示，并阻断历史图片缓存的兜底逻辑
+        if replied_image_failed_reason:
+            fail_prompt = f"\n(Note: The user quoted a message containing an image, but the fetch failed. Reason: '{replied_image_failed_reason}'. Please ignore the missing image and reply based solely on the text content above.)"
+            msg_text = f"{msg_text}{fail_prompt}" if msg_text else fail_prompt
+            # 设为非 None 的防穿透占位符，使 dify_bot 判断不为空从而跳过历史缓存拉取，
+            # 又因为不存在该路径，上传逻辑自然会跳过（不会报错退出）
+            replied_image_path = "FETCH_FAILED_STUB"
 
         # 获取用户信息（提前获取，因为图片缓存也需要用到）
         user_id = event.get_user_id() or "user"

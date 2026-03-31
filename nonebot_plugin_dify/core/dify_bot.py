@@ -134,16 +134,21 @@ class DifyBot:
 
             # 2. 处理引用消息的图片
             if replied_image_path:
-                try:
-                    replied_files = await self._upload_file_from_path(replied_image_path, session.user)
-                    if replied_files:
-                        all_files.extend(replied_files)
-                except Exception as e:
-                    logger.warning(f"Failed to upload replied image: {e}")
-                finally:
-                    # 清理临时文件
-                    if os.path.exists(replied_image_path):
-                        os.remove(replied_image_path)
+                if os.path.exists(replied_image_path):
+                    try:
+                        replied_files = await self._upload_file_from_path(replied_image_path, session.user)
+                        if replied_files:
+                            all_files.extend(replied_files)
+                    except Exception as e:
+                        logger.warning(f"Failed to upload replied image: {e}")
+                    finally:
+                        # 清理临时文件
+                        if os.path.exists(replied_image_path):
+                            os.remove(replied_image_path)
+                else:
+                    logger.debug(
+                        f"Replied image path provided but file not found, skipping upload: {replied_image_path}"
+                    )
 
             # 3. 处理图片引用缓存（检测用户是否引用历史图片）
             adapter_name = self._extract_adapter_name(full_user_id)
