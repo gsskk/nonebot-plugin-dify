@@ -6,6 +6,8 @@ class StreamingBuffer:
         self.buffer = ""
         self.min_char = min_char
         self.in_code_block = False
+        self.in_think_block = False
+        self._think_buffer = ""
 
     def _is_safe_to_split(self, segment: str) -> bool:
         """
@@ -38,7 +40,38 @@ class StreamingBuffer:
         if not chunk:
             return
 
-        self.buffer += chunk
+        self._think_buffer += chunk
+
+        while True:
+            if self.in_think_block:
+                idx = self._think_buffer.find("</think>")
+                if idx != -1:
+                    self.in_think_block = False
+                    self._think_buffer = self._think_buffer[idx + 8 :]
+                else:
+                    last_lt = self._think_buffer.rfind("<")
+                    if last_lt != -1 and "</think>".startswith(self._think_buffer[last_lt:]):
+                        self._think_buffer = self._think_buffer[last_lt:]
+                        break
+                    else:
+                        self._think_buffer = ""
+                        break
+            else:
+                idx = self._think_buffer.find("<think>")
+                if idx != -1:
+                    self.in_think_block = True
+                    self.buffer += self._think_buffer[:idx]
+                    self._think_buffer = self._think_buffer[idx + 7 :]
+                else:
+                    last_lt = self._think_buffer.rfind("<")
+                    if last_lt != -1 and "<think>".startswith(self._think_buffer[last_lt:]):
+                        self.buffer += self._think_buffer[:last_lt]
+                        self._think_buffer = self._think_buffer[last_lt:]
+                        break
+                    else:
+                        self.buffer += self._think_buffer
+                        self._think_buffer = ""
+                        break
 
         # Quick check for code block state to prevent scanning huge blocks unnecessarily
         # This global state tracks if we are GLOBALLY inside a code block across chunks
@@ -427,7 +460,12 @@ class StreamingBuffer:
             start = 0
 
     def flush(self) -> Generator[str, None, None]:
+        if self._think_buffer and not self.in_think_block:
+            self.buffer += self._think_buffer
+            self._think_buffer = ""
+
         if self.buffer.strip():
             yield self.buffer.strip()
         self.buffer = ""
         self.in_code_block = False
+        self.in_think_block = False
